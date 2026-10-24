@@ -44,12 +44,15 @@ public sealed record CueSpec(
 
     public int PowerRating => Rate(Power * (1 + (BreakBoost - 1) * 0.5), 0.86, 1.2);
     public int SpinRating => Rate(Spin, 0.7, 1.4);
-    public int AccuracyRating => Rate(0.5 - AimError, 0, 0.5);
+    public int AccuracyRating => Rate(0.3 - AimError, 0, 0.3);
     public int ControlRating => Rate(1.7 - Squirt, 0, 1.5);
     public int VisionRating => Rate(Vision, 0.6, 1.4);
     public int Overall => (PowerRating + SpinRating + AccuracyRating + ControlRating + VisionRating) / 5;
 
     public bool Has(CuePerk perk) => (Perks & perk) != 0;
+
+    /// <summary>Stroke wobble (degrees, 1 sigma) at a given power: soft shots are nearly exact, power shots wobble.</summary>
+    public double WobbleDeg(double power) => AimError * (0.3 + 0.7 * power * power);
 }
 
 public static class CueCatalog
@@ -61,31 +64,31 @@ public static class CueCatalog
     public static readonly IReadOnlyList<CueSpec> All =
     [
         new("house", "House Cue", "Bar rack", CueTier.Common, 0,
-            Power: 0.9, Spin: 0.7, AimError: 0.5, Squirt: 1.6, Vision: 0.6, BreakBoost: 1.0, CuePerk.None,
+            Power: 0.9, Spin: 0.7, AimError: 0.25, Squirt: 1.6, Vision: 0.6, BreakBoost: 1.0, CuePerk.None,
             Shaft: "#B08A5A", Accent: "#5A6B7D", Butt: "#3A2A1C", Glow: "#8E89BC",
             Story: "Warped a little, chalked a lot. Every legend started with one of these."),
         new("starter", "Neon Starter", "Neon Cue Works", CueTier.Common, 500,
-            Power: 0.95, Spin: 0.85, AimError: 0.36, Squirt: 1.35, Vision: 0.75, BreakBoost: 1.0, CuePerk.None,
+            Power: 0.95, Spin: 0.85, AimError: 0.18, Squirt: 1.35, Vision: 0.75, BreakBoost: 1.0, CuePerk.None,
             Shaft: "#D9B985", Accent: "#00F0FF", Butt: "#14243A", Glow: "#00F0FF",
             Story: "A straight maple shaft and a glowing ring. Honest and reliable."),
         new("viper", "Violet Viper", "Serpent Custom", CueTier.Rare, 1500,
-            Power: 1.0, Spin: 1.05, AimError: 0.25, Squirt: 1.05, Vision: 0.88, BreakBoost: 1.0, CuePerk.None,
+            Power: 1.0, Spin: 1.05, AimError: 0.15, Squirt: 1.05, Vision: 0.88, BreakBoost: 1.0, CuePerk.None,
             Shaft: "#E2C79A", Accent: "#8A5CFF", Butt: "#24123F", Glow: "#8A5CFF",
             Story: "Snake-skin wrap and a quick, lively hit. Loved by league players."),
         new("thunder", "Thunder Breaker", "Storm Forge", CueTier.Rare, 3000,
-            Power: 1.12, Spin: 0.85, AimError: 0.3, Squirt: 1.2, Vision: 0.8, BreakBoost: 1.22, CuePerk.BreakBooster,
+            Power: 1.12, Spin: 0.85, AimError: 0.18, Squirt: 1.2, Vision: 0.8, BreakBoost: 1.22, CuePerk.BreakBooster,
             Shaft: "#C7C9D1", Accent: "#FFC23D", Butt: "#1C1F2B", Glow: "#FFC23D",
             Story: "Phenolic tip, heavy butt. Built for one job: exploding the rack."),
         new("phantom", "Carbon Phantom", "Black Lab", CueTier.Epic, 6000,
-            Power: 1.02, Spin: 1.15, AimError: 0.13, Squirt: 0.3, Vision: 1.0, BreakBoost: 1.0, CuePerk.LowDeflection,
+            Power: 1.02, Spin: 1.15, AimError: 0.08, Squirt: 0.3, Vision: 1.0, BreakBoost: 1.0, CuePerk.LowDeflection,
             Shaft: "#2B2D33", Accent: "#00F0FF", Butt: "#101114", Glow: "#00F0FF",
             Story: "Carbon-fibre low-deflection shaft. Use english without aiming around it."),
         new("silk", "Silk Road Inlay", "Atelier Damascus", CueTier.Epic, 12000,
-            Power: 1.04, Spin: 1.25, AimError: 0.09, Squirt: 0.7, Vision: 1.12, BreakBoost: 1.0, CuePerk.None,
+            Power: 1.04, Spin: 1.25, AimError: 0.05, Squirt: 0.7, Vision: 1.12, BreakBoost: 1.0, CuePerk.None,
             Shaft: "#EAD3A8", Accent: "#16B864", Butt: "#3B1020", Glow: "#16B864",
             Story: "Hand-cut mother-of-pearl inlays. Buttery feel, surgical spin."),
         new("dragon", "Golden Dragon", "Imperial Cue House", CueTier.Legendary, 25000,
-            Power: 1.08, Spin: 1.35, AimError: 0.04, Squirt: 0.4, Vision: 1.25, BreakBoost: 1.08, CuePerk.EagleEye | CuePerk.LowDeflection,
+            Power: 1.08, Spin: 1.35, AimError: 0.02, Squirt: 0.4, Vision: 1.25, BreakBoost: 1.08, CuePerk.EagleEye | CuePerk.LowDeflection,
             Shaft: "#F2DDAF", Accent: "#FFC23D", Butt: "#5A0E12", Glow: "#FFC23D",
             Story: "24k gold rings and a dragon carved down the butt. Champions only."),
         new("royale", "Black Diamond Royale", "Maison Noire", CueTier.Mythic, 50000,

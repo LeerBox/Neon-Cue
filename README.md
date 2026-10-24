@@ -30,24 +30,24 @@ playing them out in that same engine.
 
 | Cue | Tier | Price | Speed | Spin | Wobble | Deflection | Perks |
 |---|---|---:|---:|---:|---:|---:|---|
-| House Cue | Common | free | ×0.90 | ×0.70 | ±0.50° | 1.6° | — |
-| Neon Starter | Common | 500 | ×0.95 | ×0.85 | ±0.36° | 1.35° | — |
-| Violet Viper | Rare | 1,500 | ×1.00 | ×1.05 | ±0.25° | 1.05° | — |
-| Thunder Breaker | Rare | 3,000 | ×1.12 | ×0.85 | ±0.30° | 1.2° | Break boost +22% |
-| Carbon Phantom | Epic | 6,000 | ×1.02 | ×1.15 | ±0.13° | 0.3° | Low deflection |
-| Silk Road Inlay | Epic | 12,000 | ×1.04 | ×1.25 | ±0.09° | 0.7° | — |
-| Golden Dragon | Legendary | 25,000 | ×1.08 | ×1.35 | ±0.04° | 0.4° | Low deflection, Eagle Eye |
+| House Cue | Common | free | ×0.90 | ×0.70 | ±0.25° | 1.6° | — |
+| Neon Starter | Common | 500 | ×0.95 | ×0.85 | ±0.18° | 1.35° | — |
+| Violet Viper | Rare | 1,500 | ×1.00 | ×1.05 | ±0.15° | 1.05° | — |
+| Thunder Breaker | Rare | 3,000 | ×1.12 | ×0.85 | ±0.18° | 1.2° | Break boost +22% |
+| Carbon Phantom | Epic | 6,000 | ×1.02 | ×1.15 | ±0.08° | 0.3° | Low deflection |
+| Silk Road Inlay | Epic | 12,000 | ×1.04 | ×1.25 | ±0.05° | 0.7° | — |
+| Golden Dragon | Legendary | 25,000 | ×1.08 | ×1.35 | ±0.02° | 0.4° | Low deflection, Eagle Eye |
 | Black Diamond Royale | Mythic | 50,000 | ×1.10 | ×1.40 | ±0.00° | 0.2° | All three |
 
 - **Speed** scales the cue ball's top speed, and **Spin** scales how much follow, draw and english it carries.
-- **Wobble** is random stroke error added to every shot.
+- **Wobble** is random stroke error at full power. Soft shots wobble only 30% as much, and a faint cone on the aim line shows the spread at your current power. A weaker cue also magnifies the CPU's own aiming error.
 - **Deflection** ("squirt") is how far side spin pushes the cue ball off the stick line. The aim guide shows the real launch line, so you can see it.
 - **Aim vision** sets how long the guide lines are. **Eagle Eye** also draws the bounce off the first cushion.
 - **Coach pick**: the shop marks the best cue you own or can afford for the selected game mode. Each mode weights the stats differently; for example, 9-Ball favours break power and Straight Pool favours accuracy.
 - **CPU cues**: CPU players use cues that match their level: Rookie gets the House Cue, Amateur the Violet Viper, Pro the Carbon Phantom and Master the Golden Dragon.
 - **Coins**: +5 per ball you pot vs the CPU (+2 in practice). Winning a rack pays 60 × the CPU level (Rookie = 1 … Master = 4), and winning the match adds 100 × the CPU level. Losing a rack still pays +15. Two-player games pay nothing.
 
-Same AI and level, different cue (`tests/NeonCue.Sim -- cues 40`, Pro vs Pro): Black Diamond Royale beat the House Cue in 34/40 racks, Carbon Phantom beat the Neon Starter in 29/40, and Violet Viper beat the House Cue in 30/40.
+Same AI and level, different cue (`tests/NeonCue.Sim -- cues 40`, Pro vs Pro): Black Diamond Royale beat the House Cue in 27/40 racks, Carbon Phantom beat the Neon Starter in 26/40, and Violet Viper beat the House Cue in 22/40.
 
 ## How the AI thinks
 
@@ -73,11 +73,11 @@ Headless benchmark (`tests/NeonCue.Sim`, CPU vs CPU), share of non-break shots t
 | Action | Input |
 |---|---|
 | Aim | Move the mouse |
-| Shoot | Press, drag back, release (further = harder) |
+| Shoot | Press anywhere (on the cue ball or on the target), drag back, release (further = harder) |
 | Fine aim | Mouse wheel or ← → (Shift = coarse) |
 | Keyboard shot | ↑ ↓ power, Space to shoot |
 | Spin | Click the cue-ball widget (bottom right) or W A S D, R to reset |
-| Ball in hand | Move the cue ball, click to place; click it again to pick it up |
+| Ball in hand | Move the cue ball, click to place; click it again to pick it up (dragging from it shoots instead) |
 | AI coach | H |
 | Cue shop (from the menu) | C |
 | Aim guide / fast forward / sound | G / F / M |
@@ -92,6 +92,14 @@ dotnet run --project src/NeonCue -c Release
 ```
 
 Or download `NeonCue-win-x64.zip` from the [Releases](../../releases) page. It is self-contained, so it does not need .NET installed. Unzip it and run `NeonCue.exe`.
+
+### Automated play-test
+
+```bash
+src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe --playtest report.txt 100
+```
+
+A scripted player drives the real game screen with mouse input (move, press, drag back, release). It plays hundreds of set-up pots with different cues, spins and gestures, and compares the result with a perfect stroke along the aim guide. CI fails if a perfect cue sinks fewer than 90% of the pots the guide promises. See [docs/playtest-report.txt](docs/playtest-report.txt) for the latest report.
 
 ### AI and physics test bench
 

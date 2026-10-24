@@ -1,0 +1,19 @@
+Neon Cue play-test — 100 set-up pots per row, real mouse input path
+
+cue      gesture           spin  ideal%    ui%  lost  wrong1st  aimErr°   max°
+royale   DragFromTarget     0.0      98     96     3         0    0.071   0.27
+royale   DragFromTarget     0.6      99     99     0         0    0.068   0.24
+royale   DragFromCueBall    0.0      98     96     3         0    0.071   0.27
+royale   DragFromCueBall    0.6      99     98     1         0    0.068   0.24
+royale   BallInHandDrag     0.0      98     97     2         0    0.071   0.27
+royale   BallInHandDrag     0.6      99     98     1         0    0.068   0.24
+house    DragFromTarget     0.0      99     80    20         0    0.071   0.27
+house    DragFromTarget     0.6      99     83    17         0    0.065   0.25
+house    DragFromCueBall    0.0      99     80    19         0    0.071   0.27
+house    DragFromCueBall    0.6      99     87    13         0    0.065   0.25
+house    BallInHandDrag     0.0      99     81    18         0    0.071   0.27
+house    BallInHandDrag     0.6      99     86    13         0    0.065   0.25
+
+ideal% = pot rate with a perfect stroke along the guide; ui% = pot rate through the mouse;
+lost = pots the perfect stroke makes but the mouse stroke missed; wrong1st = cue ball hit a different first ball than the guide showed.
+RESULT: PASS

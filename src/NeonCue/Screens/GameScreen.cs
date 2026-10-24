@@ -123,6 +123,9 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     bool HumanTurn => !state.CurrentPlayer.IsAI && !state.RackOver;
+    const double AimFreezeRadius = 4.5 * R;
+    bool pressedOnCue;
+    double aimSetDist;
 
     // ================================================================== flow
 
@@ -133,6 +136,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         aiShot = null;
         phaseTime = 0;
         aimLocked = false;
+        aimSetDist = 0;
         if (state.RackOver)
         {
             phase = Phase.RackOver;
@@ -162,7 +166,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         // Cheaper cues wobble: human strokes pick up the cue's aim error (AI noise already includes it).
         var stick = state.CurrentPlayer.Cue;
-        if (!state.CurrentPlayer.IsAI && stick.AimError > 0) angle += Gauss() * stick.AimError * Math.PI / 180;
+        if (!state.CurrentPlayer.IsAI && stick.AimError > 0) angle += Gauss() * stick.WobbleDeg(power) * Math.PI / 180;
         Physics.Strike(state.Cue, angle, power, side, top, stick, state.IsBreakShot);
         events = new ShotEvents();
         physicsAcc = 0;
@@ -451,8 +455,20 @@ sealed class GameScreen : IScreen, IPhysicsListener
             {
                 if (aimLocked && Distance(e.Location, aimLockPoint) < 30 * u) return;
                 aimLocked = false;
+                // Close to the cue ball the direction becomes twitchy (a pixel is a big angle),
+                // so the aim freezes there: you can move onto the cue ball and pull back cleanly.
                 Vec2 v = mouseWorld - state.Cue.Pos;
-                if (v.Length > 4) aimAngle = v.Angle;
+                double dist = v.Length;
+                if (dist <= AimFreezeRadius) return;
+                // Keep the most precise aim: a change smaller than one pixel's worth of angle at
+                // this radius is rounding noise unless the cursor is at least as far out as before.
+                double pixelNoise = 1.2 / Math.Max(1, dist * view.Scale);
+                double delta = Math.Abs(Math.IEEERemainder(v.Angle - aimAngle, 2 * Math.PI));
+                if (delta > pixelNoise || dist >= aimSetDist * 0.97)
+                {
+                    aimAngle = v.Angle;
+                    aimSetDist = dist;
+                }
             }
         }
     }
@@ -495,11 +511,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (phase == Phase.Aiming)
         {
-            if (state.BallInHand && Vec2.Distance(mouseWorld, state.Cue.Pos) < R * 1.6)
-            {
-                phase = Phase.Placing;
-                return;
-            }
+            // With ball in hand, a click on the cue ball picks it up; a drag from it shoots.
+            pressedOnCue = state.BallInHand && Vec2.Distance(mouseWorld, state.Cue.Pos) < R * 1.6;
             dragging = true;
             dragStart = mouseWorld;
             dragPower = 0;
@@ -512,7 +525,12 @@ sealed class GameScreen : IScreen, IPhysicsListener
         if (!dragging) return;
         dragging = false;
         if (HumanTurn && phase == Phase.Aiming && dragPower > 0.01) Shoot(aimAngle, dragPower, spinSide, spinTop);
-        else dragPower = 0;
+        else
+        {
+            dragPower = 0;
+            if (pressedOnCue && HumanTurn && phase == Phase.Aiming) phase = Phase.Placing;
+        }
+        pressedOnCue = false;
     }
 
     public void MouseWheel(MouseEventArgs e)
@@ -734,6 +752,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         double tRail = RayToRail(c, d);
         var (hit, tHit) = FirstHit(c, d);
 
+        DrawAccuracyCone(g, c, d, hit != null && tHit < tRail ? tHit : tRail, stick);
         if (hit != null && tHit < tRail)
         {
             Vec2 ghost = c + d * tHit;
@@ -796,6 +815,21 @@ sealed class GameScreen : IScreen, IPhysicsListener
             Gfx.GlowLine(g, P(c), P(p), Theme.A(GuideColor, 200), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
             if (full || eagle) DrawBounce(g, p, d, (eagle ? 320 : 130) * vision, GuideColor);
         }
+    }
+
+    /// <summary>Shaded wedge showing the cue's stroke wobble (2 sigma) at the current power.</summary>
+    void DrawAccuracyCone(Graphics g, Vec2 c, Vec2 d, double length, CueSpec stick)
+    {
+        double power = dragging ? dragPower : kbPower;
+        double half = 2 * stick.WobbleDeg(power) * Math.PI / 180;
+        if (half < 1e-4) return;
+        Vec2 a = c + d.Rotated(half) * length, b = c + d.Rotated(-half) * length;
+        Color tint = Look.Realistic ? Color.White : Theme.Cyan;
+        using var br = new SolidBrush(Theme.A(tint, 40));
+        g.FillPolygon(br, [P(c), P(a), P(b)]);
+        using var edge = new Pen(Theme.A(tint, 90), 0.8f);
+        g.DrawLine(edge, P(c), P(a));
+        g.DrawLine(edge, P(c), P(b));
     }
 
     /// <summary>Reflects a guide line off the cushion it reached at <paramref name="p"/>.</summary>
@@ -1032,11 +1066,33 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     // ================================================================== screenshots
 
+    // ------------------------------------------------------------------ play-test hooks
+
+    internal GameState State => state;
+    internal double AimAngle => aimAngle;
+    internal bool ReadyForHuman => HumanTurn && !paused && phase is Phase.Aiming or Phase.Placing;
+    internal bool ShotInProgress => phase == Phase.Rolling;
+    internal bool IsPlacing => phase == Phase.Placing;
+    internal ShotEvents LastEvents => events;
+    internal PointF ToScreen(Vec2 w) => view.ToScreen(w);
+    internal void DebugBeginTurn() { SyncRolling(); BeginTurn(); }
+    internal void DebugSetSpin(double side, double top) { spinSide = side; spinTop = top; }
+
+    /// <summary>What the aim guide currently promises: first ball hit and its departure direction.</summary>
+    internal (int ball, Vec2 objDir)? PredictedHit()
+    {
+        var stick = state.CurrentPlayer.Cue;
+        Vec2 c = state.Cue.Pos, d = Vec2.FromAngle(Physics.LaunchAngle(aimAngle, spinSide, stick));
+        var (hit, t) = FirstHit(c, d);
+        if (hit == null || t > RayToRail(c, d)) return null;
+        return (hit.Number, (hit.Pos - (c + d * t)).Normalized());
+    }
+
     /// <summary>Builds a mid-game position with the aim guide showing, for README screenshots.</summary>
     public void SetupDemo()
     {
         var s = state;
-        s.Players[0].Cue = CueCatalog.Get("dragon");
+        s.Players[0].Cue = CueCatalog.Get(Environment.GetEnvironmentVariable("NEONCUE_DEMO_CUE") ?? "dragon");
         var cue = s.Cue;
         cue.Pos = new Vec2(Table.HeadStringX - 25, Table.Height / 2 - 30);
         var apex = s.ObjectBallsOnTable.OrderBy(b => b.Pos.X).First();

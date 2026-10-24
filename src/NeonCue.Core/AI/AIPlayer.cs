@@ -76,12 +76,17 @@ public static class AIPlayer
     public static void ApplyNoise(AIShot shot, AILevel level, CueSpec cue, Random rng)
     {
         var p = ProfileFor(level);
-        shot.Angle += Gauss(rng) * StrokeNoiseDeg(p, cue) * Math.PI / 180;
+        shot.Angle += Gauss(rng) * StrokeNoiseDeg(p, cue, shot.Power) * Math.PI / 180;
         shot.Power = Math.Clamp(shot.Power * (1 + Gauss(rng) * p.PowerNoise), 0.03, 1);
     }
 
-    static double StrokeNoiseDeg(AIProfile p, CueSpec cue) =>
-        Math.Sqrt(p.AngleNoiseDeg * p.AngleNoiseDeg + cue.AimError * cue.AimError);
+    static double StrokeNoiseDeg(AIProfile p, CueSpec cue, double power)
+    {
+        // A poor cue magnifies the player's own error as well as adding its wobble.
+        double player = p.AngleNoiseDeg * (1 + 2 * cue.AimError);
+        double w = cue.WobbleDeg(power);
+        return Math.Sqrt(player * player + w * w);
+    }
 
     static double Gauss(Random rng)
     {
@@ -179,7 +184,7 @@ public static class AIPlayer
     static void RobustScores(GameState s, GameRules rules, AIProfile prof, List<Trial> top)
     {
         int n = prof.RobustSamples;
-        double na = Math.Max(StrokeNoiseDeg(prof, s.CurrentPlayer.Cue), 0.12) * Math.PI / 180;
+        double na = Math.Max(StrokeNoiseDeg(prof, s.CurrentPlayer.Cue, top.Count > 0 ? top[0].Power : 0.5), 0.12) * Math.PI / 180;
         double np = Math.Max(prof.PowerNoise, 0.02);
         var perturbed = new List<(Trial parent, Trial t)>();
         foreach (var t in top)
