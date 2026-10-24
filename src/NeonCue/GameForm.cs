@@ -78,5 +78,7 @@ sealed class GameForm : Form, IHost
         screen = new GameScreen(this);
     }
 
+    public void ShowShop() => screen = new ShopScreen(this);
+
     public void Quit() => Close();
 }

@@ -72,13 +72,16 @@ public static class AIPlayer
         return PlanShot(s, rules, prof, rng, allowSafety: true);
     }
 
-    /// <summary>Applies the level's stroke error to a planned shot.</summary>
-    public static void ApplyNoise(AIShot shot, AILevel level, Random rng)
+    /// <summary>Applies the level's stroke error, plus the cue's own wobble, to a planned shot.</summary>
+    public static void ApplyNoise(AIShot shot, AILevel level, CueSpec cue, Random rng)
     {
         var p = ProfileFor(level);
-        shot.Angle += Gauss(rng) * p.AngleNoiseDeg * Math.PI / 180;
+        shot.Angle += Gauss(rng) * StrokeNoiseDeg(p, cue) * Math.PI / 180;
         shot.Power = Math.Clamp(shot.Power * (1 + Gauss(rng) * p.PowerNoise), 0.03, 1);
     }
+
+    static double StrokeNoiseDeg(AIProfile p, CueSpec cue) =>
+        Math.Sqrt(p.AngleNoiseDeg * p.AngleNoiseDeg + cue.AimError * cue.AimError);
 
     static double Gauss(Random rng)
     {
@@ -176,7 +179,7 @@ public static class AIPlayer
     static void RobustScores(GameState s, GameRules rules, AIProfile prof, List<Trial> top)
     {
         int n = prof.RobustSamples;
-        double na = Math.Max(prof.AngleNoiseDeg, 0.12) * Math.PI / 180;
+        double na = Math.Max(StrokeNoiseDeg(prof, s.CurrentPlayer.Cue), 0.12) * Math.PI / 180;
         double np = Math.Max(prof.PowerNoise, 0.02);
         var perturbed = new List<(Trial parent, Trial t)>();
         foreach (var t in top)
@@ -220,7 +223,7 @@ public static class AIPlayer
         if (t.Placement is Vec2 pl) c.Cue.Pos = pl;
         c.BallInHand = false;
         int scoreBefore = c.Players[me].Score;
-        Physics.Strike(c.Cue, t.Angle, t.Power, t.Side, t.Top);
+        Physics.Strike(c.Cue, t.Angle, t.Power, t.Side, t.Top, c.Players[me].Cue, c.IsBreakShot);
         var ev = Physics.Simulate(c.Balls);
         var o = rules.ApplyShot(c, ev, new Random(7));
         bool potted = ev.PocketedObjects.Any();

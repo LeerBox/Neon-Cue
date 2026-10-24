@@ -13,6 +13,7 @@ static class Snapshot
         public SoundFx Sound { get; } = new() { Enabled = false };
         public void ShowMenu() { }
         public void StartGame() { }
+        public void ShowShop() { }
         public void Quit() { }
     }
 
@@ -40,6 +41,14 @@ static class Snapshot
                 screen.Update(1 / 60.0);
                 if (frame % 30 == 0) { screen.Draw(g, bmp.Size); Thread.Sleep(2); }
             }
+        }
+        else if (what == "shop")
+        {
+            host.Settings.Coins = 14250;
+            host.Settings.OwnedCues = ["house", "starter", "viper", "phantom"];
+            host.Settings.EquippedCue = "phantom";
+            screen = new ShopScreen(host);
+            screen.KeyDown(Keys.Down);
         }
         else screen = new MenuScreen(host);
 

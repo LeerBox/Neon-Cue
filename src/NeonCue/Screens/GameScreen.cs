@@ -81,8 +81,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     PlayerState[] MakePlayers()
     {
-        PlayerState Human(string name) => new() { Name = name };
-        PlayerState Bot(string name) => new() { Name = name, IsAI = true, Level = cfg.Level };
+        PlayerState Human(string name) => new() { Name = name, Cue = cfg.Equipped };
+        PlayerState Bot(string name) => new() { Name = name, IsAI = true, Level = cfg.Level, Cue = CueCatalog.ForAI(cfg.Level) };
         if (rules.IsSolo) return cfg.Opponent == OpponentType.CpuVsCpu ? [Bot("NEON-BOT")] : [Human("You")];
         return cfg.Opponent switch
         {
@@ -130,7 +130,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     void Shoot(double angle, double power, double side, double top)
     {
-        Physics.Strike(state.Cue, angle, power, side, top);
+        // Cheaper cues wobble: human strokes pick up the cue's aim error (AI noise already includes it).
+        var stick = state.CurrentPlayer.Cue;
+        if (!state.CurrentPlayer.IsAI && stick.AimError > 0) angle += Gauss() * stick.AimError * Math.PI / 180;
+        Physics.Strike(state.Cue, angle, power, side, top, stick, state.IsBreakShot);
         events = new ShotEvents();
         physicsAcc = 0;
         rollTime = 0;
@@ -144,10 +147,42 @@ sealed class GameScreen : IScreen, IPhysicsListener
         fx.Burst(state.Cue.Pos - Vec2.FromAngle(angle) * R, Theme.Cyan, 8 + (int)(power * 14), 90 + power * 160, 1.8f);
     }
 
+    double Gauss()
+    {
+        double u1 = 1 - rng.NextDouble(), u2 = rng.NextDouble();
+        return Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2);
+    }
+
+    /// <summary>Coins are only earned against the CPU or in solo practice (no farming in hot-seat).</summary>
+    bool Earns(int player) => !state.Players[player].IsAI && (rules.IsSolo || cfg.Opponent == OpponentType.Cpu);
+
+    int Rewards(int shooter, ShotOutcome o)
+    {
+        int coins = 0;
+        if (Earns(shooter) && !o.Foul) coins += events.PocketedObjects.Count() * (rules.IsSolo ? 2 : 5);
+        if (o.RackOver && !rules.IsSolo)
+        {
+            int human = Array.FindIndex(state.Players, p => !p.IsAI);
+            if (human >= 0 && Earns(human))
+            {
+                int tier = (int)cfg.Level + 1;
+                if (o.Winner == human) coins += 60 * tier + (state.MatchOver ? 100 * tier : 0);
+                else coins += 15;
+            }
+        }
+        if (coins > 0)
+        {
+            cfg.Coins += coins;
+            if (o.RackOver) cfg.Save();
+        }
+        return coins;
+    }
+
     void FinishShot()
     {
         int shooter = state.Current;
         var o = rules.ApplyShot(state, events, rng);
+        int coins = Rewards(shooter, o);
         foreach (var m in o.Messages)
         {
             Color c = m.StartsWith("FOUL") || m.Contains("loses") || m.Contains("early") ? Theme.Red
@@ -158,6 +193,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (!o.RackOver && state.BallInHand && state.PlayerCount > 1 && o.Foul)
             Say($"Ball in hand — {state.CurrentPlayer.Name}", Theme.Amber);
+        if (coins > 0) Say($"+{coins} coins", Theme.Amber, o.RackOver ? 4 : 1.6);
         if (o.RackOver) host.Sound.Win();
         if (!o.RackOver && !o.Foul && shooter != state.Current && state.PlayerCount > 1 && events.PocketedObjects.Any() == false)
             fx.Pulse(state.Cue.Pos, Theme.PlayerColor(state.Current), 26);
@@ -225,7 +261,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 if (aiTask is { IsCompleted: true } && phaseTime > 0.55 * ff)
                 {
                     aiShot = aiTask.IsCompletedSuccessfully ? aiTask.Result : Fallback();
-                    AIPlayer.ApplyNoise(aiShot, state.CurrentPlayer.Level, rng);
+                    AIPlayer.ApplyNoise(aiShot, state.CurrentPlayer.Level, state.CurrentPlayer.Cue, rng);
                     spinSide = aiShot.SpinSide;
                     spinTop = aiShot.SpinTop;
                     aiFromAngle = aimAngle;
@@ -650,8 +686,12 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     void DrawAimGuide(Graphics g)
     {
-        Vec2 c = state.Cue.Pos, d = Vec2.FromAngle(aimAngle);
+        // The guide shows where the ball really goes: side spin squirts it off the stick line.
+        var stick = state.CurrentPlayer.Cue;
+        Vec2 c = state.Cue.Pos, d = Vec2.FromAngle(Physics.LaunchAngle(aimAngle, spinSide, stick));
         bool full = cfg.Guide == AimGuide.Full;
+        bool eagle = stick.Has(CuePerk.EagleEye);
+        double vision = stick.Vision;
         double tRail = RayToRail(c, d);
         var (hit, tHit) = FirstHit(c, d);
 
@@ -675,9 +715,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
             }
 
             Vec2 n = (hit.Pos - ghost).Normalized();
-            double objLen = full ? Math.Min(RayToRail(hit.Pos, n) + R, 700) : 70;
+            double toRail = RayToRail(hit.Pos, n);
+            double objLen = full ? Math.Min(toRail + R, 700 * vision) : 70 * vision;
             Vec2 objEnd = hit.Pos + n * objLen;
             Gfx.GlowLine(g, P(hit.Pos), P(objEnd), Color.FromArgb(230, 255, 255, 255), 1.4f, 2, 3, 36);
+            if (eagle && toRail < 700 * vision) DrawBounce(g, hit.Pos + n * toRail, n, 260, Color.White);
 
             if (full)
             {
@@ -699,7 +741,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             Vec2 tan = d - n * Vec2.Dot(d, n);
             if (tan.Length > 0.02)
             {
-                double len = (full ? 150 : 45) * tan.Length;
+                double len = (full ? 150 : 45) * vision * tan.Length;
                 Gfx.GlowLine(g, P(ghost), P(ghost + tan.Normalized() * len), Theme.A(Theme.Magenta, 200), 1.1f, 1.5f, 2, 30);
             }
             else if (full && Math.Abs(spinTop) > 0.05)
@@ -713,49 +755,25 @@ sealed class GameScreen : IScreen, IPhysicsListener
         {
             Vec2 p = c + d * tRail;
             Gfx.GlowLine(g, P(c), P(p), Theme.A(Theme.Cyan, 200), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
-            if (full)
-            {
-                bool vertical = p.X <= R + 0.01 || p.X >= Table.Width - R - 0.01;
-                Vec2 d2 = vertical ? new Vec2(-d.X, d.Y) : new Vec2(d.X, -d.Y);
-                Gfx.GlowLine(g, P(p), P(p + d2 * 130), Theme.A(Theme.Cyan, 110), 1f, 1.4f, 2, 22, DashStyle.Dash);
-            }
+            if (full || eagle) DrawBounce(g, p, d, (eagle ? 320 : 130) * vision, Theme.Cyan);
         }
+    }
+
+    /// <summary>Reflects a guide line off the cushion it reached at <paramref name="p"/>.</summary>
+    void DrawBounce(Graphics g, Vec2 p, Vec2 d, double length, Color color)
+    {
+        bool vertical = p.X <= R + 0.01 || p.X >= Table.Width - R - 0.01;
+        Vec2 d2 = vertical ? new Vec2(-d.X, d.Y) : new Vec2(d.X, -d.Y);
+        double len = Math.Min(length, RayToRail(p, d2));
+        Gfx.GlowLine(g, P(p), P(p + d2 * len), Theme.A(color, 120), 1f, 1.4f, 2, 22, DashStyle.Dash);
     }
 
     void DrawCue(Graphics g, double angle, double power)
     {
-        Vec2 c = state.Cue.Pos;
         Vec2 d = Vec2.FromAngle(angle);
-        Vec2 tip = c - d * (R + 4 + power * 115);
+        Vec2 tip = state.Cue.Pos - d * (R + 4 + power * 115);
         Vec2 butt = tip - d * 560;
-        Vec2 perp = d.Perp();
-        const double tipW = 2.4, buttW = 6.4;
-
-        PointF[] Poly(Vec2 offset) =>
-        [
-            P(tip + perp * tipW + offset), P(butt + perp * buttW + offset),
-            P(butt - perp * buttW + offset), P(tip - perp * tipW + offset),
-        ];
-
-        using (var sb = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPolygon(sb, Poly(new Vec2(6, 9)));
-
-        var pts = Poly(Vec2.Zero);
-        using (var lg = new LinearGradientBrush(P(tip), P(butt), Theme.Cyan, Theme.FrameDark))
-        {
-            lg.InterpolationColors = new ColorBlend
-            {
-                Colors = [Theme.Cyan, Color.White, Color.White, Theme.Hex("#3B3360"), Theme.Hex("#2A2446"), Theme.Magenta, Theme.Hex("#1A1630"), Theme.Hex("#0E0C1A")],
-                Positions = [0f, 0.012f, 0.03f, 0.04f, 0.6f, 0.63f, 0.68f, 1f],
-            };
-            g.FillPolygon(lg, pts);
-        }
-        using var outline = new GraphicsPath();
-        outline.AddPolygon(pts);
-        for (int i = 3; i >= 1; i--)
-        {
-            using var pen = new Pen(Theme.A(Theme.Magenta, 22), i * 2.2f) { LineJoin = LineJoin.Round };
-            g.DrawPath(pen, outline);
-        }
+        CueArt.Draw(g, P(tip), P(butt), 2.4f, 6.4f, state.CurrentPlayer.Cue, clock, 1f);
     }
 
     // ------------------------------------------------------------------ HUD
@@ -803,10 +821,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
         else using (var pen = new Pen(Theme.A(accent, 60), 1.2f * u)) g.DrawPath(pen, path);
 
         float px = rect.X + 18 * u;
-        string tag = p.IsAI ? $"CPU • {p.Level.ToString().ToUpperInvariant()}" : "HUMAN";
+        string tag = (p.IsAI ? $"CPU • {p.Level.ToString().ToUpperInvariant()}" : "HUMAN") + $" • {p.Cue.Name.ToUpperInvariant()}";
         Gfx.Text(g, p.Name, Theme.F(22 * u, FontStyle.Bold), active ? Color.White : Theme.Text, new RectangleF(px, rect.Y + 8 * u, rect.Width * 0.55f, 30 * u));
         var nameSize = g.MeasureString(p.Name, Theme.F(22 * u, FontStyle.Bold));
-        Gfx.Text(g, tag, Theme.F(11 * u, FontStyle.Bold), Theme.A(accent, 200), new RectangleF(px + nameSize.Width + 4 * u, rect.Y + 14 * u, 120 * u, 20 * u));
+        Gfx.Text(g, tag, Theme.F(11 * u, FontStyle.Bold), Theme.A(CueArt.TierColor(p.Cue.Tier) == Theme.TextDim ? accent : CueArt.TierColor(p.Cue.Tier), 220),
+            new RectangleF(px + nameSize.Width + 4 * u, rect.Y + 14 * u, rect.Right - 70 * u - (px + nameSize.Width + 4 * u), 20 * u));
 
         string status = rules.Status(state, i);
         if (active && phase == Phase.AIThinking)
@@ -980,10 +999,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
     public void SetupDemo()
     {
         var s = state;
+        s.Players[0].Cue = CueCatalog.Get("dragon");
         var cue = s.Cue;
         cue.Pos = new Vec2(Table.HeadStringX - 25, Table.Height / 2 - 30);
         var apex = s.ObjectBallsOnTable.OrderBy(b => b.Pos.X).First();
-        Physics.Strike(cue, (apex.Pos - cue.Pos).Angle, 1.0, 0, 0);
+        Physics.Strike(cue, (apex.Pos - cue.Pos).Angle, 1.0, 0, 0, s.CurrentPlayer.Cue, true);
         s.BallInHand = false;
         var ev = Physics.Simulate(s.Balls);
         rules.ApplyShot(s, ev, rng);

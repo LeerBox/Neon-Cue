@@ -5,6 +5,16 @@
 using System.Diagnostics;
 using NeonCue.Core;
 
+if (args.Length > 0 && args[0] == "cues")
+{
+    // Same AI level, different cue: does equipment matter?
+    int n = args.Length > 1 ? int.Parse(args[1]) : 12;
+    CueDuel(AILevel.Pro, "house", "royale", GameMode.EightBall, n);
+    CueDuel(AILevel.Pro, "starter", "phantom", GameMode.NineBall, n);
+    CueDuel(AILevel.Pro, "house", "viper", GameMode.EightBall, n);
+    return 0;
+}
+
 if (args.Length > 0 && args[0] == "duel")
 {
     int n = args.Length > 1 ? int.Parse(args[1]) : 10;
@@ -44,7 +54,19 @@ static void Duel(AILevel a, AILevel b, GameMode mode, int racks)
     Console.WriteLine($"{mode}: {a} beat {b} in {winsA}/{racks} racks");
 }
 
-static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, int breaker = 0)
+static void CueDuel(AILevel level, string cueA, string cueB, GameMode mode, int racks)
+{
+    int winsB = 0;
+    for (int r = 0; r < racks; r++)
+    {
+        int w = PlayRack(mode, level, level, 9000 + r * 13, new Stats(), breaker: r % 2,
+            cues: [CueCatalog.Get(cueA), CueCatalog.Get(cueB)]);
+        if (w == 1) winsB++;
+    }
+    Console.WriteLine($"{mode} ({level} vs {level}): {CueCatalog.Get(cueB).Name} beat {CueCatalog.Get(cueA).Name} in {winsB}/{racks} racks");
+}
+
+static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, int breaker = 0, CueSpec[]? cues = null)
 {
     var rng = new Random(seed);
     var rules = GameRules.Create(mode);
@@ -55,9 +77,11 @@ static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, i
         TargetScore = mode == GameMode.Rotation ? 61 : 25,
         Breaker = breaker,
         Players = rules.IsSolo
-            ? [new PlayerState { Name = "Solo", IsAI = true, Level = l0 }]
-            : [new PlayerState { Name = "A", IsAI = true, Level = l0 }, new PlayerState { Name = "B", IsAI = true, Level = l1 }],
+            ? [new PlayerState { Name = "Solo", IsAI = true, Level = l0, Cue = CueCatalog.ForAI(l0) }]
+            : [new PlayerState { Name = "A", IsAI = true, Level = l0, Cue = CueCatalog.ForAI(l0) }, new PlayerState { Name = "B", IsAI = true, Level = l1, Cue = CueCatalog.ForAI(l1) }],
     };
+    if (cues != null)
+        for (int i = 0; i < s.PlayerCount; i++) s.Players[i].Cue = cues[i];
     rules.NewRack(s, rng);
 
     int maxShots = rules.IsSolo ? 40 : 250;
@@ -70,7 +94,7 @@ static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, i
         double ms = sw.Elapsed.TotalMilliseconds;
         st.PlanMs += ms;
         st.MaxMs = Math.Max(st.MaxMs, ms);
-        AIPlayer.ApplyNoise(shot, lvl, rng);
+        AIPlayer.ApplyNoise(shot, lvl, s.CurrentPlayer.Cue, rng);
 
         if (shot.Placement is Vec2 p)
         {
@@ -85,7 +109,7 @@ static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, i
         bool wasBreak = s.IsBreakShot;
         int shooter = s.Current;
 
-        Physics.Strike(s.Cue, shot.Angle, shot.Power, shot.SpinSide, shot.SpinTop);
+        Physics.Strike(s.Cue, shot.Angle, shot.Power, shot.SpinSide, shot.SpinTop, s.CurrentPlayer.Cue, wasBreak);
         var ev = Physics.Simulate(s.Balls);
         var o = rules.ApplyShot(s, ev, rng);
         shots++;

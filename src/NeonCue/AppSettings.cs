@@ -16,6 +16,23 @@ public sealed class AppSettings
     public AimGuide Guide { get; set; } = AimGuide.Full;
     public bool Sound { get; set; } = true;
 
+    public int Coins { get; set; } = 300;
+    public List<string> OwnedCues { get; set; } = ["house"];
+    public string EquippedCue { get; set; } = "house";
+
+    public CueSpec Equipped => CueCatalog.Get(OwnedCues.Contains(EquippedCue) ? EquippedCue : "house");
+    public bool Owns(CueSpec cue) => cue.Price == 0 || OwnedCues.Contains(cue.Id);
+
+    public bool TryBuy(CueSpec cue)
+    {
+        if (Owns(cue) || Coins < cue.Price) return false;
+        Coins -= cue.Price;
+        OwnedCues.Add(cue.Id);
+        EquippedCue = cue.Id;
+        Save();
+        return true;
+    }
+
     static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NeonCue", "settings.json");
 
     public static AppSettings Load()

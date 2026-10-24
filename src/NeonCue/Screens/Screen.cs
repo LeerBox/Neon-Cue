@@ -9,6 +9,7 @@ interface IHost
     SoundFx Sound { get; }
     void ShowMenu();
     void StartGame();
+    void ShowShop();
     void Quit();
 }
 

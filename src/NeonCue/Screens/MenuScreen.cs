@@ -103,6 +103,7 @@ sealed class MenuScreen : IScreen
         });
 
         buttons.Add(new UiButton { Text = "PLAY", Primary = true, OnClick = Play });
+        buttons.Add(new UiButton { Text = "CUE SHOP", Accent = Theme.Amber, OnClick = host.ShowShop });
         buttons.Add(new UiButton { Text = "HOW TO PLAY", OnClick = () => showHelp = true });
         buttons.Add(new UiButton { Text = "QUIT", Accent = Theme.Magenta, OnClick = host.Quit });
     }
@@ -141,8 +142,9 @@ sealed class MenuScreen : IScreen
             rows[i].Rect = new RectangleF(cx - w / 2, y + i * (h + gap), w, h);
         float by = y + rows.Count * (h + gap) + 54 * u;
         buttons[0].Rect = new RectangleF(cx - 150 * u, by, 300 * u, 60 * u);
-        buttons[1].Rect = new RectangleF(cx - 200 * u, by + 76 * u, 190 * u, 44 * u);
-        buttons[2].Rect = new RectangleF(cx + 10 * u, by + 76 * u, 190 * u, 44 * u);
+        buttons[1].Rect = new RectangleF(cx - 295 * u, by + 76 * u, 190 * u, 44 * u);
+        buttons[2].Rect = new RectangleF(cx - 95 * u, by + 76 * u, 190 * u, 44 * u);
+        buttons[3].Rect = new RectangleF(cx + 105 * u, by + 76 * u, 190 * u, 44 * u);
 
         if (floaters.Count == 0)
         {
@@ -195,9 +197,12 @@ sealed class MenuScreen : IScreen
 
         foreach (var b in buttons) b.Draw(g, u);
 
-        Gfx.Text(g, "↑↓ select   ←→ change   Enter play   F1 help", Theme.F(13 * u), Theme.A(Theme.TextDim, 170),
+        Gfx.Text(g, "↑↓ select   ←→ change   Enter play   C cue shop   F1 help", Theme.F(13 * u), Theme.A(Theme.TextDim, 170),
             new RectangleF(0, s.Height - 34 * u, s.Width, 24 * u), StringAlignment.Center);
-        Gfx.Text(g, "v1.0", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
+        var cue = cfg.Equipped;
+        Gfx.Text(g, $"COINS  {cfg.Coins:N0}", Theme.F(18 * u, FontStyle.Bold), Theme.Amber, new RectangleF(s.Width - 336 * u, 20 * u, 310 * u, 26 * u), StringAlignment.Far);
+        Gfx.Text(g, $"CUE  {cue.Name}", Theme.F(14 * u, FontStyle.Bold), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 336 * u, 46 * u, 310 * u, 22 * u), StringAlignment.Far);
+        Gfx.Text(g, "v1.1", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
     }
@@ -243,7 +248,7 @@ sealed class MenuScreen : IScreen
             "Spin — click the cue ball widget (bottom right) or W A S D. R resets.\n" +
             "Ball in hand — move the cue ball, click to place; click it again to pick up.\n" +
             "H — ask the AI coach for a shot.   G — aim guide.   F — fast forward.\n" +
-            "M — sound.   Esc — pause menu.";
+            "M — sound.   Esc — pause menu.   C (in menu) — cue shop: better cues hit harder, spin more, wobble less.";
         Gfx.Text(g, "CONTROLS", Theme.F(16 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(r.X + 40 * u, r.Y + 80 * u, 300 * u, 24 * u));
         Gfx.WrappedText(g, controls, Theme.F(15 * u), Theme.Text, new RectangleF(r.X + 40 * u, r.Y + 108 * u, r.Width - 80 * u, 220 * u));
 
@@ -318,6 +323,9 @@ sealed class MenuScreen : IScreen
                 return true;
             case Keys.F1:
                 showHelp = true;
+                return true;
+            case Keys.C:
+                host.ShowShop();
                 return true;
         }
         return false;

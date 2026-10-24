@@ -41,14 +41,20 @@ public static class Physics
     const double TwoR = 2 * R;
     const double FourR2 = 4 * R * R;
 
-    public static void Strike(Ball cue, double angle, double power, double spinSide, double spinTop)
+    public static void Strike(Ball cue, double angle, double power, double spinSide, double spinTop, CueSpec? stick = null, bool isBreak = false)
     {
+        stick ??= CueCatalog.Standard;
         power = Math.Clamp(power, 0, 1);
-        cue.Vel = Vec2.FromAngle(angle) * (power * MaxShotSpeed);
-        cue.SpinSide = Math.Clamp(spinSide, -1, 1);
-        cue.SpinTop = Math.Clamp(spinTop, -1, 1);
+        double speed = power * MaxShotSpeed * stick.Power * (isBreak ? stick.BreakBoost : 1);
+        cue.Vel = Vec2.FromAngle(LaunchAngle(angle, spinSide, stick)) * speed;
+        cue.SpinSide = Math.Clamp(spinSide * stick.Spin, -1.5, 1.5);
+        cue.SpinTop = Math.Clamp(spinTop * stick.Spin, -1.5, 1.5);
         cue.SpinUsed = false;
     }
+
+    /// <summary>Direction the cue ball actually leaves in: side spin squirts it away from the english.</summary>
+    public static double LaunchAngle(double aimAngle, double spinSide, CueSpec? stick) =>
+        aimAngle - spinSide * (stick ?? CueCatalog.Standard).Squirt * Math.PI / 180;
 
     /// <summary>Simulates until every ball rests. Mutates the balls.</summary>
     public static ShotEvents Simulate(Ball[] balls)

@@ -10,6 +10,7 @@ public sealed class PlayerState
     public string Name = "";
     public bool IsAI;
     public AILevel Level = AILevel.Pro;
+    public CueSpec Cue = CueCatalog.Standard;
     public Group Group;
     public int Score;
     public int RacksWon;
