@@ -4,13 +4,22 @@ using NeonCue.Screens;
 namespace NeonCue;
 
 /// <summary>
-/// Automated human player: drives the real game screen with synthetic mouse input (move, press,
-/// drag back, release) on hundreds of set-up pots, and compares what the aim guide promised with
-/// what actually happened. Run with: NeonCue.exe --playtest [trials]
+/// Automated human player: drives the real game screen with synthetic mouse and keyboard input on
+/// hundreds of set-up pots, behaving like a hand does (imprecise pointing, wobbly paths to the cue
+/// ball, arrow-key fine-tuning), and compares the result with a perfect stroke along the guide.
+/// Run with: NeonCue.exe --playtest report.txt [trials]
 /// </summary>
 static class PlayTest
 {
-    enum Gesture { DragFromTarget, DragFromCueBall, BallInHandDrag }
+    enum Gesture
+    {
+        PreciseFromTarget,   // pixel-exact pointing, press on the target, drag back
+        SloppyToCueBall,     // +-2px pointing, wobbly path to the cue ball, press there, drag back
+        KeysThenCueBall,     // rough pointing, arrow-key fine-tune, wobbly path to the cue ball
+        BallInHand,          // place by click, check pick-up, then sloppy pull from the cue ball
+    }
+
+    sealed record Row(string Cue, Gesture Gesture, AimGuide Guide, double Side, bool Close, bool Gated);
 
     sealed class Host : IHost
     {
@@ -24,44 +33,60 @@ static class PlayTest
 
     sealed class Tally
     {
-        public int N, IdealPots, UiPots, GuideRight, WrongFirst, LostPots;
-        public double AimErrSum, AimErrMax;
+        public int N, IdealPots, UiPots, LostPots, WrongFirst;
+        public double AimErrSum;
         public readonly HashSet<string> Failures = new();
     }
 
-    static void Fail(Tally t, string why) => t.Failures.Add(why);
-
-    /// <summary>Returns false when a perfect-cue row falls below 90% of its ideal pot rate.</summary>
+    /// <summary>Returns false when a gated row loses more than 10% of the pots the guide promises.</summary>
     public static bool Run(string reportPath, int trials)
     {
+        Row[] rows =
+        [
+            new("royale", Gesture.PreciseFromTarget, AimGuide.Full, 0, false, true),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, true),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0.6, false, true),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, true, true),
+            new("royale", Gesture.KeysThenCueBall, AimGuide.Off, 0, false, true),
+            new("royale", Gesture.KeysThenCueBall, AimGuide.Off, 0, true, true),
+            new("royale", Gesture.BallInHand, AimGuide.Full, 0, false, true),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Off, 0, false, false),
+            new("house", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, false),
+            new("house", Gesture.KeysThenCueBall, AimGuide.Off, 0, false, false),
+        ];
+
         bool ok = true;
-        var lines = new List<string> { $"Neon Cue play-test — {trials} set-up pots per row, real mouse input path", "" };
-        lines.Add($"{"cue",-8} {"gesture",-16} {"spin",5} {"ideal%",7} {"ui%",6} {"lost",5} {"wrong1st",9} {"aimErr°",8} {"max°",6}");
-        foreach (var cue in new[] { "royale", "house" })
-            foreach (var gesture in Enum.GetValues<Gesture>())
-                foreach (var side in new[] { 0.0, 0.6 })
-                {
-                    var t = new Tally();
-                    var rng = new Random(77);
-                    for (int i = 0; i < trials; i++) Trial(cue, gesture, side, rng, t);
-                    foreach (var f in t.Failures) lines.Add($"  FAIL: {f}");
-                    if (t.Failures.Count > 0 || (cue == "royale" && t.UiPots < 0.9 * t.IdealPots)) ok = false;
-                    lines.Add($"{cue,-8} {gesture,-16} {side,5:0.0} {100.0 * t.IdealPots / t.N,7:0} {100.0 * t.UiPots / t.N,6:0} {t.LostPots,5} {t.WrongFirst,9} {t.AimErrSum / t.N,8:0.000} {t.AimErrMax,6:0.00}");
-                }
+        var lines = new List<string>
+        {
+            $"Neon Cue play-test - {trials} set-up pots per row, driven through the real mouse/keyboard handlers",
+            "",
+            $"{"cue",-7} {"gesture",-18} {"guide",-9} {"spin",4} {"range",-6} {"ideal%",6} {"ui%",5} {"lost",5} {"wrong1st",8} {"aimErr",7}",
+        };
+        foreach (var row in rows)
+        {
+            var t = new Tally();
+            var rng = new Random(77);
+            for (int i = 0; i < trials; i++) Trial(row, rng, t);
+            foreach (var f in t.Failures) lines.Add($"  FAIL: {f}");
+            if (t.Failures.Count > 0 || (row.Gated && t.UiPots < 0.9 * t.IdealPots)) ok = false;
+            lines.Add($"{row.Cue,-7} {row.Gesture,-18} {row.Guide,-9} {row.Side,4:0.0} {(row.Close ? "close" : "normal"),-6} {100.0 * t.IdealPots / t.N,6:0} {100.0 * t.UiPots / t.N,5:0} {t.LostPots,5} {t.WrongFirst,8} {t.AimErrSum / t.N,6:0.00}°");
+        }
         lines.Add("");
-        lines.Add("ideal% = pot rate with a perfect stroke along the guide; ui% = pot rate through the mouse;");
-        lines.Add("lost = pots the perfect stroke makes but the mouse stroke missed; wrong1st = cue ball hit a different first ball than the guide showed.");
+        lines.Add("ideal% = pot rate of a perfect stroke along the guide; ui% = pot rate through the controls;");
+        lines.Add("lost = pots the perfect stroke makes but the controlled stroke missed; aimErr = mean stick-angle error at release.");
+        lines.Add("Ungated rows: guide Off without fine-tune (raw mouse precision) and the House Cue (wobble by design).");
         lines.Add(ok ? "RESULT: PASS" : "RESULT: FAIL");
         File.WriteAllLines(reportPath, lines);
         return ok;
     }
 
-    static void Trial(string cueId, Gesture gesture, double side, Random rng, Tally t)
+    static void Trial(Row row, Random rng, Tally t)
     {
         const double R = Table.R;
         var host = new Host();
-        host.Settings.OwnedCues = [cueId];
-        host.Settings.EquippedCue = cueId;
+        host.Settings.OwnedCues = [row.Cue];
+        host.Settings.EquippedCue = row.Cue;
+        host.Settings.Guide = row.Guide;
         var gs = new GameScreen(host);
         using var bmp = new Bitmap(1280, 800);
         using var g = Graphics.FromImage(bmp);
@@ -71,8 +96,8 @@ static class PlayTest
         foreach (var b in s.Balls) if (b.Number > 1) b.Pocketed = true;
         var target = s.Balls[1];
 
-        // A random makeable pot: object ball, pocket, cut angle, distance.
-        Vec2 cuePos, ghost, aimPoint;
+        // A random makeable pot.
+        Vec2 cuePos, ghost;
         Pocket pocket;
         while (true)
         {
@@ -82,89 +107,101 @@ static class PlayTest
             double appr = Math.Acos(Math.Clamp(Vec2.Dot(dir, -pocket.Inward), -1, 1));
             if (appr > (pocket.IsCorner ? 0.9 : 0.6)) continue;
             double cut = (rng.NextDouble() * 2 - 1) * 40 * Math.PI / 180;
-            double dist = 120 + rng.NextDouble() * 330;
+            double dist = row.Close ? 30 + rng.NextDouble() * 80 : 120 + rng.NextDouble() * 330;
             ghost = tp - dir * (2 * R);
             cuePos = ghost - dir.Rotated(cut) * dist;
             if (cuePos.X < 2 * R || cuePos.X > Table.Width - 2 * R || cuePos.Y < 2 * R || cuePos.Y > Table.Height - 2 * R) continue;
+            if (Vec2.Distance(cuePos, tp) < 2.6 * R) continue;
             target.Pos = tp;
-            aimPoint = pocket.Aim;
             break;
         }
         s.Cue.Pos = cuePos;
-        s.BallInHand = gesture == Gesture.BallInHandDrag;
+        s.BallInHand = row.Gesture == Gesture.BallInHand;
         s.KitchenOnly = false;
         s.IsBreakShot = false;
         gs.DebugBeginTurn();
-        gs.DebugSetSpin(side, 0);
+        gs.DebugSetSpin(row.Side, 0);
         gs.Draw(g, bmp.Size);
-        if (gesture == Gesture.BallInHandDrag)
+
+        Point P(Vec2 w) { var p = gs.ToScreen(w); return new Point((int)Math.Round(p.X), (int)Math.Round(p.Y)); }
+        MouseEventArgs M(Point p) => new(MouseButtons.Left, 1, p.X, p.Y, 0);
+        void Move(Point p) { gs.MouseMove(M(p)); gs.Update(1 / 120.0); }
+        Point Jitter(Point p, int px) => new(p.X + rng.Next(-px, px + 1), p.Y + rng.Next(-px, px + 1));
+
+        if (row.Gesture == Gesture.BallInHand)
         {
-            // Place the cue ball with a click, check a plain click picks it back up, then place again.
-            var at = gs.ToScreen(cuePos);
-            var e = new MouseEventArgs(MouseButtons.Left, 1, (int)Math.Round(at.X), (int)Math.Round(at.Y), 0);
-            gs.MouseMove(e); gs.MouseDown(e); gs.MouseUp(e);
-            if (gs.IsPlacing) Fail(t, "click did not place the cue ball");
-            gs.MouseDown(e); gs.MouseUp(e);
-            if (!gs.IsPlacing) Fail(t, "click on the cue ball did not pick it up");
-            gs.MouseDown(e); gs.MouseUp(e);
+            var at = P(cuePos);
+            Move(at); gs.MouseDown(M(at)); gs.MouseUp(M(at));
+            if (gs.IsPlacing) t.Failures.Add("click did not place the cue ball");
+            gs.MouseDown(M(at)); gs.MouseUp(M(at));
+            if (!gs.IsPlacing) t.Failures.Add("click on the cue ball did not pick it up");
+            gs.MouseDown(M(at)); gs.MouseUp(M(at));
             cuePos = s.Cue.Pos;
         }
 
         var stick = s.CurrentPlayer.Cue;
-        double ideal = (ghost - cuePos).Angle;                       // launch direction we need
-        double aimNeeded = ideal + side * stick.Squirt * Math.PI / 180; // stick angle that launches along it
-        double dTotal = Vec2.Distance(cuePos, ghost) + Vec2.Distance(target.Pos, aimPoint);
+        double aimNeeded = (ghost - cuePos).Angle + row.Side * stick.Squirt * Math.PI / 180;
+        double dTotal = Vec2.Distance(cuePos, ghost) + Vec2.Distance(target.Pos, pocket.Aim);
         double power = Math.Clamp(0.22 + dTotal / 2600, 0.15, 0.7);
 
-        // Perfect stroke for reference.
         var refState = s.Clone();
-        Physics.Strike(refState.Cue, aimNeeded, power, side, 0, stick, false);
+        Physics.Strike(refState.Cue, aimNeeded, power, row.Side, 0, stick, false);
         var refEv = Physics.Simulate(refState.Balls);
         bool idealPot = refEv.Pocketed.Contains(1) && !refEv.CueScratched;
 
-        // Human-like input: point at the ghost ball along the needed stick line.
-        Point P(Vec2 w) { var p = gs.ToScreen(w); return new Point((int)Math.Round(p.X), (int)Math.Round(p.Y)); }
-        MouseEventArgs M(Point p) => new(MouseButtons.Left, 1, p.X, p.Y, 0);
-        double ppu = gs.ToScreen(new Vec2(1, 0)).X - gs.ToScreen(Vec2.Zero).X;
+        // Point at the ghost ball (or a little past it when it is very close to the cue ball).
         Vec2 aimDir = Vec2.FromAngle(aimNeeded);
-        Vec2 pointAt = cuePos + aimDir * Vec2.Distance(cuePos, ghost);
-        var aimPx = P(pointAt);
-        gs.MouseMove(M(aimPx));
+        double pointDist = Math.Max(Vec2.Distance(cuePos, ghost), 4 * R);
+        Vec2 pointAt = cuePos + aimDir * pointDist;
+        int sloppiness = row.Gesture switch { Gesture.PreciseFromTarget => 0, Gesture.KeysThenCueBall => 6, _ => 2 };
+        var aimPx = Jitter(P(pointAt), sloppiness);
+        // Arrive at the target from outside, like a hand settling.
+        Move(new Point(aimPx.X + 30, aimPx.Y - 20));
+        Move(new Point(aimPx.X + 8, aimPx.Y - 4));
+        Move(aimPx);
+        // Humans look at the guide for a moment; PreciseFromTarget presses with no pause at all.
+        if (row.Gesture != Gesture.PreciseFromTarget)
+            for (int k = 0; k < 12; k++) gs.Update(1 / 60.0);
+
+        if (row.Gesture == Gesture.KeysThenCueBall)
+        {
+            // Fine-tune with the arrow keys until the stick is on the line, as the guide shows a human.
+            for (int k = 0; k < 2000; k++)
+            {
+                double err = Math.IEEERemainder(aimNeeded - gs.AimAngle, 2 * Math.PI);
+                if (Math.Abs(err) < 0.0003) break;
+                bool coarse = Math.Abs(err) > 0.003;
+                gs.KeyDown((err > 0 ? Keys.Right : Keys.Left) | (coarse ? Keys.Shift : Keys.None));
+            }
+        }
 
         Point pressAt = aimPx;
-        if (gesture == Gesture.DragFromCueBall)
+        Vec2 pullFrom = pointAt;
+        if (row.Gesture != Gesture.PreciseFromTarget)
         {
-            // Walk the cursor from the target to the cue ball, as a hand would.
-            for (int k = 1; k <= 12; k++) gs.MouseMove(M(P(Vec2.Lerp(pointAt, cuePos, k / 12.0))));
-            pressAt = P(cuePos);
+            // Wobbly path from the target over to the cue ball.
+            for (int k = 1; k <= 14; k++)
+                Move(Jitter(P(Vec2.Lerp(pointAt, cuePos, k / 14.0)), k == 14 ? 2 : 4));
+            pressAt = Jitter(P(cuePos), 2);
+            pullFrom = cuePos;
+            for (int k = 0; k < 9; k++) gs.Update(1 / 60.0); // short hesitation on the cue ball
         }
-        if (gesture == Gesture.BallInHandDrag)
-        {
-            for (int k = 1; k <= 12; k++) gs.MouseMove(M(P(Vec2.Lerp(pointAt, cuePos, k / 12.0))));
-            pressAt = P(cuePos);
-        }
-        var predicted = gs.PredictedHit();
-        double aimAtPress = gs.AimAngle;
         gs.MouseDown(M(pressAt));
         double pull = power * 260;
-        Vec2 from = gesture == Gesture.DragFromTarget ? pointAt : cuePos;
-        for (int k = 1; k <= 10; k++) gs.MouseMove(M(P(from - aimDir * (pull * k / 10.0))));
+        int dragJitter = row.Gesture == Gesture.PreciseFromTarget ? 0 : 3;
+        for (int k = 1; k <= 10; k++) Move(Jitter(P(pullFrom - aimDir * (pull * k / 10.0)), dragJitter));
         double aimAtRelease = gs.AimAngle;
-        gs.MouseUp(M(P(from - aimDir * pull)));
+        gs.MouseUp(M(P(pullFrom - aimDir * pull)));
 
         for (int f = 0; f < 60 * 50 && (gs.ShotInProgress || !gs.ReadyForHuman); f++) gs.Update(1 / 60.0);
 
         var ev = gs.LastEvents;
         bool uiPot = ev.Pocketed.Contains(1) && !ev.CueScratched;
-        double err = Math.Abs(Math.IEEERemainder(aimAtRelease - aimNeeded, 2 * Math.PI)) * 180 / Math.PI;
-
         t.N++;
         if (idealPot) t.IdealPots++;
         if (uiPot) t.UiPots++;
         if (idealPot && !uiPot) t.LostPots++;
-        if (predicted is { } ph && ph.ball == 1) t.GuideRight++;
         if (ev.FirstContact != 1) t.WrongFirst++;
-        t.AimErrSum += err;
-        t.AimErrMax = Math.Max(t.AimErrMax, err);
+        t.AimErrSum += Math.Abs(Math.IEEERemainder(aimAtRelease - aimNeeded, 2 * Math.PI)) * 180 / Math.PI;
     }
 }

@@ -48,7 +48,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     double phaseTime, rollTime, physicsAcc, clock, overlayTimer;
     double aimAngle = Math.PI, kbPower = 0.45, dragPower, spinSide, spinTop;
     bool dragging, spinDrag, fastForward, aimLocked;
-    Point aimLockPoint, mouse;
+    Point mouse;
     Vec2 dragStart, mouseWorld;
     ShotEvents events = new();
     Task<AIShot>? aiTask, hintTask;
@@ -123,7 +123,27 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     bool HumanTurn => !state.CurrentPlayer.IsAI && !state.RackOver;
-    const double AimFreezeRadius = 4.5 * R;
+    const double AimFreezeRadius = 1.6 * R;   // over the cue ball itself
+    const double GripRadius = 3 * R;          // pressing this close to the cue ball = pulling back from it
+    double rawAim = Math.PI;
+    Vec2 lastMouseWorld;
+    double lastMoveTime;
+
+    /// <summary>Background simulation of the current aim at 20 power levels.</summary>
+    sealed class ShotPreview
+    {
+        public int Version;
+        public int Target = -1;
+        public readonly bool[] Pots = new bool[PreviewSteps + 1];
+        public readonly Vec2?[] Stops = new Vec2?[PreviewSteps + 1];
+        public bool Any => Pots.Any(x => x);
+    }
+    const int PreviewSteps = 20;
+    volatile ShotPreview? preview;
+    int previewVersion;
+    (double aim, double side, double top, Vec2 cue, int shot) previewKey;
+    bool aimDwellPending;
+    const double SlowAimSpeed = 350;          // px/s: slower than this is aiming, faster is travelling
     bool pressedOnCue;
     double aimSetDist;
 
@@ -137,6 +157,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         phaseTime = 0;
         aimLocked = false;
         aimSetDist = 0;
+        lastMouseWorld = mouseWorld;
         if (state.RackOver)
         {
             phase = Phase.RackOver;
@@ -281,6 +302,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
 
         SyncRolling();
+        UpdateAimDwell();
+        UpdatePreview();
         if (hintTask is { IsCompleted: true }) ApplyHint();
         if (paused) return;
         phaseTime += dt;
@@ -416,12 +439,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
         var h = task.Result;
         if (h.Placement is Vec2 p && state.BallInHand && state.IsValidCuePlacement(p)) state.Cue.Pos = p;
         if (phase == Phase.Placing) phase = Phase.Aiming;
-        aimAngle = h.Angle;
         kbPower = Math.Round(h.Power, 2);
         spinSide = h.SpinSide;
         spinTop = h.SpinTop;
-        aimLocked = true;
-        aimLockPoint = mouse;
+        SetManualAim(h.Angle);
         Say($"Coach: {h.Plan} — press Space", Theme.Lime, 4);
     }
 
@@ -453,24 +474,172 @@ sealed class GameScreen : IScreen, IPhysicsListener
             }
             else
             {
-                if (aimLocked && Distance(e.Location, aimLockPoint) < 30 * u) return;
-                aimLocked = false;
-                // Close to the cue ball the direction becomes twitchy (a pixel is a big angle),
-                // so the aim freezes there: you can move onto the cue ball and pull back cleanly.
-                Vec2 v = mouseWorld - state.Cue.Pos;
-                double dist = v.Length;
-                if (dist <= AimFreezeRadius) return;
-                // Keep the most precise aim: a change smaller than one pixel's worth of angle at
-                // this radius is rounding noise unless the cursor is at least as far out as before.
-                double pixelNoise = 1.2 / Math.Max(1, dist * view.Scale);
-                double delta = Math.Abs(Math.IEEERemainder(v.Angle - aimAngle, 2 * Math.PI));
-                if (delta > pixelNoise || dist >= aimSetDist * 0.97)
-                {
-                    aimAngle = v.Angle;
-                    aimSetDist = dist;
-                }
+                OnAimMouseMove();
             }
         }
+        lastMouseWorld = mouseWorld;
+    }
+
+    /// <summary>
+    /// Hover aiming, modelled on how people aim: the line follows the cursor while it moves slowly
+    /// (aiming) and commits when it comes to rest; quick moves (reaching for the cue ball) never
+    /// change it, nor does anything inside the grip zone around the cue ball. Fine-tuned aims stay
+    /// locked until the cursor deliberately moves sideways; the pocket magnet settles near-perfect lines.
+    /// </summary>
+    void OnAimMouseMove()
+    {
+        double now = clock;
+        double dtMove = Math.Max(1e-3, now - lastMoveTime);
+        double movedPx = (mouseWorld - lastMouseWorld).Length * view.Scale;
+        double speed = movedPx / dtMove;
+        lastMoveTime = now;
+        aimDwellPending = true;
+
+        Vec2 rel = mouseWorld - state.Cue.Pos;
+        double dist = rel.Length;
+        if (aimLocked)
+        {
+            // A fine-tuned aim only unlocks when the cursor clearly points somewhere else.
+            double off = Math.Abs(Math.IEEERemainder(rel.Angle - aimAngle, 2 * Math.PI));
+            double allowed = Math.Max(3 * Math.PI / 180, 25 / Math.Max(1, dist * view.Scale));
+            if (dist <= GripRadius || off < allowed) return;
+            aimLocked = false;
+        }
+
+        // Moving in closer than where the aim was set is reaching for the cue ball, not aiming.
+        double radialMove = dist > 1e-6 ? Vec2.Dot(mouseWorld - lastMouseWorld, rel / dist) : 0;
+        bool reaching = radialMove < 0 && dist < aimSetDist * 0.98;
+        if (speed < SlowAimSpeed && dist > GripRadius && !reaching) CommitAim();
+    }
+
+    /// <summary>
+    /// Re-simulates the aimed shot (exact physics, no wobble) at every power step whenever the aim,
+    /// spin or table changes, so the HUD can show which powers actually pot the ball.
+    /// </summary>
+    void UpdatePreview()
+    {
+        if (!HumanTurn || phase != Phase.Aiming || cfg.Guide == AimGuide.Off)
+        {
+            preview = null;
+            return;
+        }
+        var key = (aim: aimAngle, side: spinSide, top: spinTop, cue: state.Cue.Pos, shot: state.ShotNumber);
+        bool same = Math.Abs(key.aim - previewKey.aim) < 1e-6 && key.side == previewKey.side && key.top == previewKey.top
+            && Vec2.DistanceSq(key.cue, previewKey.cue) < 1e-6 && key.shot == previewKey.shot;
+        if (same) return; // up to date, or a run for this exact shot is in flight
+        previewKey = key;
+
+        var hit = PredictedHit();
+        int version = ++previewVersion;
+        if (hit is null) { preview = new ShotPreview { Version = version }; return; }
+        int target = hit.Value.ball;
+        var snap = state.Clone();
+        snap.BallInHand = false;
+        double angle = aimAngle, side = spinSide, top = spinTop;
+        var stick = state.CurrentPlayer.Cue;
+        bool legal = rules.IsLegalFirstContact(state, target);
+        preview = null;
+        Task.Run(() =>
+        {
+            var res = new ShotPreview { Version = version, Target = target };
+            for (int i = 1; i <= PreviewSteps; i++)
+            {
+                if (version != previewVersion) return;
+                var c = snap.Clone();
+                Physics.Strike(c.Cue, angle, i / (double)PreviewSteps, side, top, stick, c.IsBreakShot);
+                var ev = Physics.Simulate(c.Balls);
+                var tb = c.Balls[target];
+                res.Pots[i] = legal && ev.FirstContact == target && tb.Pocketed && !ev.CueScratched;
+                res.Stops[i] = tb.Pocketed ? null : tb.Pos;
+            }
+            if (version == previewVersion) preview = res;
+        });
+    }
+
+    int PowerStep(double power) => Math.Clamp((int)Math.Round(power * PreviewSteps), 1, PreviewSteps);
+
+    /// <summary>Called every frame: a resting cursor commits the aim it points at.</summary>
+    void UpdateAimDwell()
+    {
+        if (!aimDwellPending || aimLocked || dragging || !HumanTurn || phase != Phase.Aiming) return;
+        double still = clock - lastMoveTime;
+        double dist = Vec2.Distance(mouseWorld, state.Cue.Pos);
+        // Resting near the cue ball is usually "about to pull back", so it needs a much longer dwell.
+        double needed = dist > GripRadius ? 0.1 : 0.6;
+        if (still < needed) return;
+        aimDwellPending = false;
+        if (dist > AimFreezeRadius) CommitAim();
+    }
+
+    void CommitAim()
+    {
+        Vec2 rel = mouseWorld - state.Cue.Pos;
+        double dist = rel.Length;
+        if (dist <= AimFreezeRadius) return;
+        // A change smaller than one pixel's worth of angle at this radius is rounding noise,
+        // unless the cursor is at least as far out as when the aim was last set.
+        double pixelNoise = 1.2 / Math.Max(1, dist * view.Scale);
+        double delta = Math.Abs(Math.IEEERemainder(rel.Angle - rawAim, 2 * Math.PI));
+        if (delta <= pixelNoise && dist < aimSetDist * 0.97) return;
+        rawAim = rel.Angle;
+        aimSetDist = dist;
+        aimAngle = Magnet(rawAim, dist * view.Scale);
+    }
+
+    void SetManualAim(double angle)
+    {
+        aimAngle = angle;
+        rawAim = angle;
+        aimLocked = true;
+        aimDwellPending = false;
+    }
+
+    /// <summary>
+    /// Aim assist: if the hover aim is within a hair of a line that pots a legal ball, use that exact
+    /// line. Strength follows the aim-guide setting (Full, then Ghost ball, Off = none).
+    /// </summary>
+    double Magnet(double raw, double cursorDistPx)
+    {
+        // Tolerance covers a few pixels of hand slip at any distance (and at least a fixed angle).
+        double window = cfg.Guide switch
+        {
+            AimGuide.Full => Math.Clamp(4.0 / Math.Max(1, cursorDistPx), 1.0 * Math.PI / 180, 4.5 * Math.PI / 180),
+            AimGuide.GhostBall => Math.Clamp(1.5 / Math.Max(1, cursorDistPx), 0.4 * Math.PI / 180, 1.5 * Math.PI / 180),
+            _ => 0,
+        };
+        if (window <= 0) return raw;
+        var stick = state.CurrentPlayer.Cue;
+        Vec2 c = state.Cue.Pos;
+        double best = raw, bestD = window;
+        foreach (var t in state.Balls)
+        {
+            if (t.Number == 0 || t.Pocketed || !rules.IsLegalFirstContact(state, t.Number) || !rules.IsGoodPot(state, t.Number)) continue;
+            foreach (var p in Table.Pockets)
+            {
+                Vec2 aim = Vec2.Distance(t.Pos, p.Aim) < 3 * R ? p.Center : p.Aim;
+                Vec2 dir = (aim - t.Pos).Normalized();
+                double approach = Math.Acos(Math.Clamp(Vec2.Dot(dir, -p.Inward), -1, 1));
+                if (approach > (p.IsCorner ? 1.15 : 0.95)) continue;
+                Vec2 ghost = t.Pos - dir * (2 * R);
+                Vec2 cg = ghost - c;
+                if (cg.Length < 1 || Vec2.Dot(cg.Normalized(), dir) < 0.17) continue;
+                if (!PathClear(c, ghost, 0, t.Number) || !PathClear(t.Pos, aim, t.Number, 0)) continue;
+                double stickAngle = cg.Angle + spinSide * stick.Squirt * Math.PI / 180;
+                double d = Math.Abs(Math.IEEERemainder(stickAngle - raw, 2 * Math.PI));
+                if (d < bestD) { bestD = d; best = stickAngle; }
+            }
+        }
+        return best;
+    }
+
+    bool PathClear(Vec2 a, Vec2 b, int ex1, int ex2)
+    {
+        foreach (var o in state.Balls)
+        {
+            if (o.Pocketed || o.Number == ex1 || o.Number == ex2) continue;
+            if (Vec2.DistanceToSegment(o.Pos, a, b) < 2 * R * 0.98) return false;
+        }
+        return true;
     }
 
     void MoveCueTo(Vec2 w)
@@ -511,8 +680,12 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (phase == Phase.Aiming)
         {
-            // With ball in hand, a click on the cue ball picks it up; a drag from it shoots.
-            pressedOnCue = state.BallInHand && Vec2.Distance(mouseWorld, state.Cue.Pos) < R * 1.6;
+            // Pressing at the cue ball means "pull back from here" with the aim already set.
+            // With ball in hand, a click (no drag) on it picks it up.
+            double toCue = Vec2.Distance(mouseWorld, state.Cue.Pos);
+            // Pressing away from the cue ball commits the aim right there (unless fine-tuned).
+            if (toCue > GripRadius && !aimLocked) CommitAim();
+            pressedOnCue = state.BallInHand && toCue < R * 1.6;
             dragging = true;
             dragStart = mouseWorld;
             dragPower = 0;
@@ -529,6 +702,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         {
             dragPower = 0;
             if (pressedOnCue && HumanTurn && phase == Phase.Aiming) phase = Phase.Placing;
+            else if (HumanTurn && phase == Phase.Aiming) Say("Drag back, then release to shoot", Theme.TextDim, 1.4);
         }
         pressedOnCue = false;
     }
@@ -537,9 +711,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         if (!HumanTurn || phase != Phase.Aiming || dragging) return;
         bool coarse = (Control.ModifierKeys & Keys.Shift) != 0;
-        aimAngle += Math.Sign(e.Delta) * (coarse ? 0.012 : 0.0015);
-        aimLocked = true;
-        aimLockPoint = mouse;
+        SetManualAim(aimAngle + Math.Sign(e.Delta) * (coarse ? FineStepCoarse : FineStep));
     }
 
     void SetSpinFrom(Point p)
@@ -583,9 +755,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             case Keys.Right:
                 if (aiming)
                 {
-                    aimAngle += (k == Keys.Right ? 1 : -1) * (shift ? 0.012 : 0.0015);
-                    aimLocked = true;
-                    aimLockPoint = mouse;
+                    SetManualAim(aimAngle + (k == Keys.Right ? 1 : -1) * (shift ? FineStepCoarse : FineStep));
                 }
                 return true;
             case Keys.Up:
@@ -632,6 +802,9 @@ sealed class GameScreen : IScreen, IPhysicsListener
         buttons.Add(new UiButton { Text = state.MatchOver ? "REMATCH" : "NEXT RACK", Primary = true, OnClick = ContinueAfterRack });
         buttons.Add(new UiButton { Text = "MAIN MENU", Accent = Theme.Magenta, OnClick = host.ShowMenu });
     }
+
+    const double FineStep = 0.0005;        // ~0.03 degrees
+    const double FineStepCoarse = 0.004;   // ~0.23 degrees
 
     static float Distance(PointF a, PointF b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
@@ -781,6 +954,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
             if (full)
             {
+                // Green: this exact aim AND power pots it (simulated). Amber: the line is right, the power isn't.
+                var pv = preview;
+                double power = dragging ? dragPower : kbPower;
+                bool potsNow = pv != null && pv.Target == hit.Number && pv.Pots[PowerStep(power)];
+                bool potsSome = pv != null && pv.Target == hit.Number && pv.Any;
                 foreach (var pk in Table.Pockets)
                 {
                     Vec2 rel = pk.Aim - hit.Pos;
@@ -791,8 +969,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
                         using var ring = new GraphicsPath();
                         float pr = (float)pk.DrawRadius + 3;
                         ring.AddEllipse((float)pk.DrawCenter.X - pr, (float)pk.DrawCenter.Y - pr, pr * 2, pr * 2);
-                        Gfx.GlowPath(g, ring, Theme.Lime, 2f, 2.5f, 4, 50);
+                        Gfx.GlowPath(g, ring, potsNow ? Theme.Lime : potsSome ? Theme.Amber : Theme.A(Color.White, 120), 2f, 2.5f, 4, 50);
                     }
+                }
+                if (pv != null && pv.Target == hit.Number && !potsNow && pv.Stops[PowerStep(power)] is Vec2 stop)
+                {
+                    float sr2 = (float)R;
+                    using var sp = new Pen(Theme.A(Theme.Amber, 200), 1.2f) { DashStyle = DashStyle.Dot };
+                    g.DrawEllipse(sp, (float)stop.X - sr2, (float)stop.Y - sr2, sr2 * 2, sr2 * 2);
                 }
             }
 
@@ -972,6 +1156,27 @@ sealed class GameScreen : IScreen, IPhysicsListener
         string label = dragging || phase == Phase.AIAiming ? "POWER" : "POWER  (↑↓ / Space)";
         Gfx.Text(g, $"{label}  {power * 100:0}%", Theme.F(12 * u, FontStyle.Bold), Theme.Text, new RectangleF(powerRect.X, powerRect.Y - 22 * u, powerRect.Width, 20 * u));
 
+        var pv = HumanTurn && phase == Phase.Aiming ? preview : null;
+        if (pv != null && pv.Target > 0)
+        {
+            // Ticks under the bar for every power step that pots the aimed ball.
+            float step = powerRect.Width / PreviewSteps;
+            using (var tick = new SolidBrush(Theme.A(Theme.Lime, 230)))
+                for (int i = 1; i <= PreviewSteps; i++)
+                    if (pv.Pots[i]) g.FillRectangle(tick, powerRect.X + (i - 0.5f) * step - step / 2 + 1, powerRect.Bottom + 3 * u, step - 2, 4 * u);
+            string msg;
+            Color mc;
+            if (pv.Pots[PowerStep(power)]) { msg = "POTS ✓"; mc = Theme.Lime; }
+            else if (pv.Any)
+            {
+                int lo = Array.FindIndex(pv.Pots, x => x), hi = Array.FindLastIndex(pv.Pots, x => x);
+                msg = $"POT NEEDS {lo * 100 / PreviewSteps}–{hi * 100 / PreviewSteps}%";
+                mc = Theme.Amber;
+            }
+            else { msg = "NO POT ON THIS LINE"; mc = Theme.TextDim; }
+            Gfx.Text(g, msg, Theme.F(12 * u, FontStyle.Bold), mc, new RectangleF(powerRect.X, powerRect.Y - 22 * u, powerRect.Width, 20 * u), StringAlignment.Far);
+        }
+
         // Spin widget.
         var sr = new RectangleF(spinCenter.X - spinRadius, spinCenter.Y - spinRadius, spinRadius * 2, spinRadius * 2);
         using (var sp = new GraphicsPath())
@@ -1077,6 +1282,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal PointF ToScreen(Vec2 w) => view.ToScreen(w);
     internal void DebugBeginTurn() { SyncRolling(); BeginTurn(); }
     internal void DebugSetSpin(double side, double top) { spinSide = side; spinTop = top; }
+    internal void DebugSetGuide(AimGuide guide) => cfg.Guide = guide;
 
     /// <summary>What the aim guide currently promises: first ball hit and its departure direction.</summary>
     internal (int ball, Vec2 objDir)? PredictedHit()

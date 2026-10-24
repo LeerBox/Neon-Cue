@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using NeonCue.Core;
 using NeonCue.Rendering;
 
@@ -22,6 +23,7 @@ public sealed class AppSettings
     public List<string> OwnedCues { get; set; } = ["house"];
     public string EquippedCue { get; set; } = "house";
 
+    [JsonIgnore]
     public CueSpec Equipped => CueCatalog.Get(OwnedCues.Contains(EquippedCue) ? EquippedCue : "house");
     public bool Owns(CueSpec cue) => cue.Price == 0 || OwnedCues.Contains(cue.Id);
 

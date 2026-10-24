@@ -18,6 +18,9 @@ playing them out in that same engine.
 - **AI coach**: press **H** and the AI suggests a shot for you (aim, power and spin), ready to fire with Space.
 - **Real physics**: fixed-step ball/ball and cushion collisions, rolling friction, follow/draw and side spin, and pocket jaws that can rattle a ball out.
 - **Aim guides**: off, ghost ball, or full prediction (object-ball path, cue-ball tangent, and a highlight on the target pocket).
+- **Smart aiming**:
+  - **Pocket magnet**: an aim within a few pixels of a potting line snaps onto it exactly (strong with Full, light with Ghost ball, none with Off).
+  - **Power preview**: the aimed shot is simulated at 20 power levels in the background. Green ticks on the power bar show which powers pot the ball. The pocket lights green only when the current aim *and* power pot it, and amber when the line is right but the power isn't, with a marker where the ball would stop.
 - **Match options**: race to 1/3/5/7/9, straight-pool target 25–150, ball in hand, three-foul rule, and an 8-ball break that must go from the kitchen after a scratch.
 - **Realistic graphics, all generated in code (no image files)**:
   - Balls are rendered as 3D spheres with lighting and reflections. They roll and turn as they move, carry numbers on both sides, and the 6 and 9 are underlined.
@@ -72,9 +75,9 @@ Headless benchmark (`tests/NeonCue.Sim`, CPU vs CPU), share of non-break shots t
 
 | Action | Input |
 |---|---|
-| Aim | Move the mouse |
+| Aim | Point at the target and rest the cursor for a moment. Moving quickly to the cue ball afterwards doesn't change the aim |
 | Shoot | Press anywhere (on the cue ball or on the target), drag back, release (further = harder) |
-| Fine aim | Mouse wheel or ← → (Shift = coarse) |
+| Fine aim | Mouse wheel or ← → (0.03° per step, Shift = 0.23°); stays locked until you aim somewhere else |
 | Keyboard shot | ↑ ↓ power, Space to shoot |
 | Spin | Click the cue-ball widget (bottom right) or W A S D, R to reset |
 | Ball in hand | Move the cue ball, click to place; click it again to pick it up (dragging from it shoots instead) |
@@ -99,7 +102,7 @@ Or download `NeonCue-win-x64.zip` from the [Releases](../../releases) page. It i
 src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe --playtest report.txt 100
 ```
 
-A scripted player drives the real game screen with mouse input (move, press, drag back, release). It plays hundreds of set-up pots with different cues, spins and gestures, and compares the result with a perfect stroke along the aim guide. CI fails if a perfect cue sinks fewer than 90% of the pots the guide promises. See [docs/playtest-report.txt](docs/playtest-report.txt) for the latest report.
+A scripted player drives the real game screen with mouse and keyboard input, behaving like a human hand: it points a few pixels off, pauses on the target, takes a wobbly path to the cue ball, and fine-tunes with the arrow keys. It plays hundreds of set-up pots (close and long shots, with and without spin, with ball in hand) and compares the result with a perfect stroke along the aim guide. CI fails if a perfect cue sinks fewer than 90% of the pots the guide promises. See [docs/playtest-report.txt](docs/playtest-report.txt) for the latest report.
 
 ### AI and physics test bench
 
