@@ -128,6 +128,7 @@ static class Gfx
 
     public static void GlowLine(Graphics g, PointF a, PointF b, Color c, float width, float spread = 3, int layers = 3, int alpha = 40, DashStyle dash = DashStyle.Solid)
     {
+        if (Look.Realistic) { layers = Math.Min(layers, 1); alpha /= 2; }
         for (int i = layers; i >= 1; i--)
         {
             using var pen = new Pen(Theme.A(c, alpha), width + spread * i) { StartCap = LineCap.Round, EndCap = LineCap.Round, DashStyle = dash };

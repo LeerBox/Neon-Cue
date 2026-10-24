@@ -20,6 +20,8 @@ sealed class MenuScreen : IScreen
         public PointF Pos;
         public PointF Vel;
         public int Number;
+        public Mat3 Ori;
+        public Vec3 Axis;
     }
 
     static readonly GameMode[] Modes = Enum.GetValues<GameMode>();
@@ -31,7 +33,7 @@ sealed class MenuScreen : IScreen
     readonly List<Row> rows = new();
     readonly List<UiButton> buttons = new();
     readonly List<Floater> floaters = new();
-    readonly BallSprites sprites = new();
+    readonly BallRenderer sprites = new();
     readonly Random rng = new();
     int selected = -1;
     int hoverRow = -1;
@@ -97,6 +99,16 @@ sealed class MenuScreen : IScreen
         });
         rows.Add(new Row
         {
+            Label = "TABLE STYLE",
+            Value = () => Look.Name(cfg.Style),
+            Change = d =>
+            {
+                cfg.Style = (TableStyle)(((int)cfg.Style + d + 4) % 4);
+                Look.Style = cfg.Style;
+            },
+        });
+        rows.Add(new Row
+        {
             Label = "SOUND",
             Value = () => cfg.Sound ? "On" : "Off",
             Change = _ => { cfg.Sound = !cfg.Sound; host.Sound.Enabled = cfg.Sound; },
@@ -127,6 +139,8 @@ sealed class MenuScreen : IScreen
         foreach (var f in floaters)
         {
             f.Pos = new PointF(f.Pos.X + f.Vel.X * (float)dt, f.Pos.Y + f.Vel.Y * (float)dt);
+            double sp = Math.Sqrt(f.Vel.X * f.Vel.X + f.Vel.Y * f.Vel.Y);
+            if (sp > 0) f.Ori = Mat3.Rotation(new Vec3(-f.Vel.Y / sp, f.Vel.X / sp, 0), sp * dt / (26 * u)) * f.Ori;
             if (f.Pos.X < 0 || f.Pos.X > size.Width) f.Vel = new PointF(-f.Vel.X, f.Vel.Y);
             if (f.Pos.Y < 0 || f.Pos.Y > size.Height) f.Vel = new PointF(f.Vel.X, -f.Vel.Y);
         }
@@ -137,14 +151,14 @@ sealed class MenuScreen : IScreen
         size = s;
         u = Math.Clamp(Math.Min(s.Width / 1280f, s.Height / 800f), 0.75f, 2.2f);
         float cx = s.Width / 2f;
-        float w = 620 * u, h = 50 * u, gap = 8 * u, y = 214 * u;
+        float w = 620 * u, h = 46 * u, gap = 6 * u, y = 204 * u;
         for (int i = 0; i < rows.Count; i++)
             rows[i].Rect = new RectangleF(cx - w / 2, y + i * (h + gap), w, h);
-        float by = y + rows.Count * (h + gap) + 54 * u;
+        float by = y + rows.Count * (h + gap) + 46 * u;
         buttons[0].Rect = new RectangleF(cx - 150 * u, by, 300 * u, 60 * u);
-        buttons[1].Rect = new RectangleF(cx - 295 * u, by + 76 * u, 190 * u, 44 * u);
-        buttons[2].Rect = new RectangleF(cx - 95 * u, by + 76 * u, 190 * u, 44 * u);
-        buttons[3].Rect = new RectangleF(cx + 105 * u, by + 76 * u, 190 * u, 44 * u);
+        buttons[1].Rect = new RectangleF(cx - 295 * u, by + 72 * u, 190 * u, 44 * u);
+        buttons[2].Rect = new RectangleF(cx - 95 * u, by + 72 * u, 190 * u, 44 * u);
+        buttons[3].Rect = new RectangleF(cx + 105 * u, by + 72 * u, 190 * u, 44 * u);
 
         if (floaters.Count == 0)
         {
@@ -156,6 +170,8 @@ sealed class MenuScreen : IScreen
                     Pos = new PointF((float)(rng.NextDouble() * s.Width), (float)(rng.NextDouble() * s.Height)),
                     Vel = new PointF((float)(Math.Cos(a) * sp), (float)(Math.Sin(a) * sp)),
                     Number = 1 + i % 15,
+                    Ori = Mat3.RandomResting(rng),
+                    Axis = new Vec3(-Math.Sin(a), Math.Cos(a), 0),
                 });
             }
         }
@@ -168,8 +184,7 @@ sealed class MenuScreen : IScreen
         var full = new Rectangle(Point.Empty, s);
         using (var bg = new LinearGradientBrush(full, Theme.BgTop, Theme.Bg, 90f)) g.FillRectangle(bg, full);
 
-        sprites.Ensure(26 * u);
-        foreach (var f in floaters) sprites.Draw(g, f.Number, f.Pos);
+        foreach (var f in floaters) sprites.Draw(g, f.Number, f.Ori, 26 * u, f.Pos, 1f);
         using (var veil = new SolidBrush(Color.FromArgb(185, 7, 6, 15))) g.FillRectangle(veil, full);
 
         // Scanlines + glow spot.
@@ -202,7 +217,7 @@ sealed class MenuScreen : IScreen
         var cue = cfg.Equipped;
         Gfx.Text(g, $"COINS  {cfg.Coins:N0}", Theme.F(18 * u, FontStyle.Bold), Theme.Amber, new RectangleF(s.Width - 336 * u, 20 * u, 310 * u, 26 * u), StringAlignment.Far);
         Gfx.Text(g, $"CUE  {cue.Name}", Theme.F(14 * u, FontStyle.Bold), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 336 * u, 46 * u, 310 * u, 22 * u), StringAlignment.Far);
-        Gfx.Text(g, "v1.1", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
+        Gfx.Text(g, "v1.2", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
     }

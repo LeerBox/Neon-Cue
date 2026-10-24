@@ -18,6 +18,11 @@ static class CueArt
     /// <param name="unit">Size of one "pixel" in the current coordinate system (glow widths scale with it).</param>
     public static void Draw(Graphics g, PointF tip, PointF butt, float tipHalf, float buttHalf, CueSpec spec, double time, float unit, bool shadow = true)
     {
+        if (Look.Realistic)
+        {
+            RealCue.Draw(g, tip, butt, buttHalf, spec, time, unit, shadow);
+            return;
+        }
         float dx = butt.X - tip.X, dy = butt.Y - tip.Y;
         float len = MathF.Sqrt(dx * dx + dy * dy);
         if (len < 1) return;

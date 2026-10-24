@@ -30,8 +30,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
     readonly GameRules rules;
     readonly Random rng = new();
     readonly TableView view = new();
-    readonly BallSprites sprites = new();
     readonly Particles fx = new();
+    readonly BallRenderer balls3d = new();
+    readonly BallRenderer hudBalls = new();
+    readonly Mat3[] orient = new Mat3[16];
+    readonly Vec2[] lastPos = new Vec2[16];
+    Bitmap? shadowSprite;
+    float shadowRadius;
+    int rollUpdates;
     readonly List<Toast> toasts = new();
     readonly List<Sink> sinks = new();
     readonly List<UiButton> buttons = new();
@@ -62,8 +68,32 @@ sealed class GameScreen : IScreen, IPhysicsListener
         cfg = host.Settings;
         rules = GameRules.Create(cfg.Mode);
         state = NewMatch(0);
+        for (int i = 0; i < orient.Length; i++) orient[i] = Mat3.RandomResting(rng);
+        SyncRolling();
         BeginTurn();
     }
+
+    /// <summary>Rolls each ball's 3D orientation by the distance it moved since last frame.</summary>
+    void SyncRolling()
+    {
+        bool tidy = ++rollUpdates % 120 == 0;
+        foreach (var b in state.Balls)
+        {
+            int n = b.Number;
+            Vec2 d = b.Pos - lastPos[n];
+            double len = d.Length;
+            if (!b.Pocketed && len > 1e-6 && len < 3 * R)
+            {
+                var axis = new Vec3(-d.Y / len, d.X / len, 0);
+                orient[n] = Mat3.Rotation(axis, len / R) * orient[n];
+            }
+            if (tidy) orient[n] = orient[n].Orthonormalized();
+            lastPos[n] = b.Pos;
+        }
+    }
+
+    Color GuideColor => Look.Realistic ? Color.FromArgb(235, 255, 255, 255) : Theme.Cyan;
+    Color TangentColor => Look.Realistic ? Color.FromArgb(190, 255, 214, 120) : Theme.A(Theme.Magenta, 200);
 
     GameState NewMatch(int breaker)
     {
@@ -144,7 +174,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         state.BallInHand = false;
         hintTask = null;
         host.Sound.Cue(power);
-        fx.Burst(state.Cue.Pos - Vec2.FromAngle(angle) * R, Theme.Cyan, 8 + (int)(power * 14), 90 + power * 160, 1.8f);
+        if (!Look.Realistic) fx.Burst(state.Cue.Pos - Vec2.FromAngle(angle) * R, Theme.Cyan, 8 + (int)(power * 14), 90 + power * 160, 1.8f);
     }
 
     double Gauss()
@@ -246,6 +276,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             if (sinks[i].T >= 1) sinks.RemoveAt(i);
         }
 
+        SyncRolling();
         if (hintTask is { IsCompleted: true }) ApplyHint();
         if (paused) return;
         phaseTime += dt;
@@ -343,7 +374,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     public void BallCollision(Ball a, Ball b, double impactSpeed)
     {
         if (impactSpeed > 40) host.Sound.Clack(impactSpeed);
-        if (impactSpeed > 700) fx.Burst((a.Pos + b.Pos) / 2, Theme.Mix(Theme.Cyan, Color.White, 0.3), 4, impactSpeed * 0.12, 1.4f);
+        if (impactSpeed > 700 && !Look.Realistic) fx.Burst((a.Pos + b.Pos) / 2, Theme.Mix(Theme.Cyan, Color.White, 0.3), 4, impactSpeed * 0.12, 1.4f);
     }
 
     public void CushionHit(Ball ball, double impactSpeed) => host.Sound.Cushion(impactSpeed);
@@ -352,9 +383,12 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         sinks.Add(new Sink { Number = ball.Number, From = ball.Pos, To = pocket.DrawCenter });
         Color c = ball.Number == 0 ? Theme.Red : ball.Number == 8 ? Theme.Violet : Theme.BallColor(ball.Number);
-        fx.Burst(pocket.DrawCenter, c, 22, 260, 2.6f);
-        fx.Burst(pocket.DrawCenter, Theme.Magenta, 10, 180, 1.6f);
-        fx.Pulse(pocket.DrawCenter, c, 30);
+        if (!Look.Realistic)
+        {
+            fx.Burst(pocket.DrawCenter, c, 22, 260, 2.6f);
+            fx.Burst(pocket.DrawCenter, Theme.Magenta, 10, 180, 1.6f);
+            fx.Pulse(pocket.DrawCenter, c, 30);
+        }
         host.Sound.Pocket();
     }
 
@@ -593,7 +627,6 @@ sealed class GameScreen : IScreen, IPhysicsListener
         float top = 100 * u, bottom = 88 * u;
         view.Layout(new RectangleF(14 * u, top, s.Width - 28 * u, s.Height - top - bottom));
         view.DrawBackground(g, s);
-        sprites.Ensure((float)(R * view.Scale));
 
         var saved = g.Save();
         view.ApplyWorld(g);
@@ -620,33 +653,39 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
         if (humanAim && cfg.Guide != AimGuide.Off) DrawAimGuide(g);
 
-        // Shadows, then balls.
-        using (var shadow = new SolidBrush(Color.FromArgb(95, 0, 0, 8)))
-        {
-            foreach (var b in state.Balls)
-            {
-                if (b.Pocketed) continue;
-                g.FillEllipse(shadow, (float)(b.Pos.X - R * 0.92 + 3), (float)(b.Pos.Y - R * 0.92 + 4.5), (float)(R * 1.84), (float)(R * 1.84));
-            }
-        }
+        // Soft shadows cast away from the lamp above the table centre, then the balls.
         float invScale = 1f / view.Scale;
+        float pr = (float)(R * view.Scale);
+        if (shadowSprite == null || Math.Abs(shadowRadius - pr) > 0.01f)
+        {
+            shadowSprite?.Dispose();
+            shadowSprite = BallRenderer.MakeShadow(pr);
+            shadowRadius = pr;
+        }
+        float sw = shadowSprite.Width * invScale;
         foreach (var b in state.Balls)
         {
             if (b.Pocketed) continue;
-            sprites.Draw(g, b.Number, new PointF((float)b.Pos.X, (float)b.Pos.Y), invScale);
+            Vec2 off = (b.Pos - Table.CenterSpot) * 0.012 + new Vec2(1.5, 3);
+            g.DrawImage(shadowSprite, (float)(b.Pos.X + off.X) - sw / 2, (float)(b.Pos.Y + off.Y) - sw / 2, sw, sw);
+        }
+        foreach (var b in state.Balls)
+        {
+            if (b.Pocketed) continue;
+            balls3d.Draw(g, b.Number, orient[b.Number], pr, new PointF((float)b.Pos.X, (float)b.Pos.Y), invScale);
         }
         foreach (var sk in sinks)
         {
             var p = Vec2.Lerp(sk.From, sk.To, Smooth(sk.T));
-            sprites.Draw(g, sk.Number, new PointF((float)p.X, (float)p.Y), invScale * (float)(1 - 0.7 * sk.T));
+            balls3d.Draw(g, sk.Number, orient[sk.Number], pr, new PointF((float)p.X, (float)p.Y), invScale * (float)(1 - 0.7 * sk.T));
         }
 
         if (HumanTurn && (phase == Phase.Placing || (phase == Phase.Aiming && state.BallInHand)))
         {
             bool ok = state.IsValidCuePlacement(state.Cue.Pos);
-            float pr = (float)(R + 4 + Math.Sin(clock * 6) * 1.5);
+            float rr = (float)(R + 4 + Math.Sin(clock * 6) * 1.5);
             using var ring = new GraphicsPath();
-            ring.AddEllipse((float)state.Cue.Pos.X - pr, (float)state.Cue.Pos.Y - pr, pr * 2, pr * 2);
+            ring.AddEllipse((float)state.Cue.Pos.X - rr, (float)state.Cue.Pos.Y - rr, rr * 2, rr * 2);
             Gfx.GlowPath(g, ring, ok ? Theme.Lime : Theme.Red, 1.2f, 1.6f, 3, 50);
         }
 
@@ -699,7 +738,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         {
             Vec2 ghost = c + d * tHit;
             bool legal = rules.IsLegalFirstContact(state, hit.Number);
-            Color col = legal ? Theme.Cyan : Theme.Red;
+            Color col = legal ? GuideColor : Theme.Red;
             Gfx.GlowLine(g, P(c), P(ghost), Theme.A(col, 210), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
 
             var gr = new RectangleF((float)(ghost.X - R), (float)(ghost.Y - R), (float)(2 * R), (float)(2 * R));
@@ -742,20 +781,20 @@ sealed class GameScreen : IScreen, IPhysicsListener
             if (tan.Length > 0.02)
             {
                 double len = (full ? 150 : 45) * vision * tan.Length;
-                Gfx.GlowLine(g, P(ghost), P(ghost + tan.Normalized() * len), Theme.A(Theme.Magenta, 200), 1.1f, 1.5f, 2, 30);
+                Gfx.GlowLine(g, P(ghost), P(ghost + tan.Normalized() * len), TangentColor, 1.1f, 1.5f, 2, 30);
             }
             else if (full && Math.Abs(spinTop) > 0.05)
             {
                 // Straight-in: show follow / draw direction.
                 Vec2 dir = d * Math.Sign(spinTop);
-                Gfx.GlowLine(g, P(ghost), P(ghost + dir * (40 + 80 * Math.Abs(spinTop))), Theme.A(Theme.Magenta, 200), 1.1f, 1.5f, 2, 30);
+                Gfx.GlowLine(g, P(ghost), P(ghost + dir * (40 + 80 * Math.Abs(spinTop))), TangentColor, 1.1f, 1.5f, 2, 30);
             }
         }
         else
         {
             Vec2 p = c + d * tRail;
-            Gfx.GlowLine(g, P(c), P(p), Theme.A(Theme.Cyan, 200), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
-            if (full || eagle) DrawBounce(g, p, d, (eagle ? 320 : 130) * vision, Theme.Cyan);
+            Gfx.GlowLine(g, P(c), P(p), Theme.A(GuideColor, 200), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
+            if (full || eagle) DrawBounce(g, p, d, (eagle ? 320 : 130) * vision, GuideColor);
         }
     }
 
@@ -852,9 +891,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     void DrawMiniBall(Graphics g, int number, PointF center, float r)
     {
-        var bmp = sprites[number];
-        float s = (r * 2) / (bmp.Width - 2);
-        g.DrawImage(bmp, center.X - bmp.Width * s / 2, center.Y - bmp.Height * s / 2, bmp.Width * s, bmp.Height * s);
+        hudBalls.Draw(g, number, Mat3.Identity, r, center, 1f);
     }
 
     void DrawBottomBar(Graphics g)

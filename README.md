@@ -1,11 +1,12 @@
 # Neon Cue
 
-A neon-styled billiards game for Windows, written in C# (.NET 8, WinForms + GDI+, no external packages).
+A billiards game for Windows, written in C# (.NET 8, WinForms + GDI+, no external packages). It has a photorealistic look, with the original neon style still available.
 It has six game modes, four AI levels and a deterministic physics engine. The AI plans its shots by
 playing them out in that same engine.
 
 ![Main menu](docs/menu.png)
-![Gameplay with full aim prediction](docs/gameplay.png)
+![Classic green table](docs/gameplay.png)
+![Tournament blue table](docs/table-blue.png)
 ![Cue shop](docs/shop.png)
 
 ## Features
@@ -18,7 +19,12 @@ playing them out in that same engine.
 - **Real physics**: fixed-step ball/ball and cushion collisions, rolling friction, follow/draw and side spin, and pocket jaws that can rattle a ball out.
 - **Aim guides**: off, ghost ball, or full prediction (object-ball path, cue-ball tangent, and a highlight on the target pocket).
 - **Match options**: race to 1/3/5/7/9, straight-pool target 25–150, ball in hand, three-foul rule, and an 8-ball break that must go from the kitchen after a scratch.
-- **Neon look**: glowing rails and pockets, particle bursts, animated menu and synthesized sound (no asset files).
+- **Realistic graphics, all generated in code (no image files)**:
+  - Balls are rendered as 3D spheres with lighting and reflections. They roll and turn as they move, carry numbers on both sides, and the 6 and 9 are underlined.
+  - The table has varnished wood rails with grain, lamp-lit cloth with fibre texture, felt-covered cushions, leather pockets, mother-of-pearl diamonds and an oak floor that catches the table's shadow.
+  - Each cue is built from its materials: maple or carbon-fibre shafts; walnut, ebony, cocobolo or purpleheart forearms; inlaid points; linen, leather or snakeskin wraps; and gold or silver rings.
+- **Table styles**: Classic green, Tournament blue, Royal burgundy, or Neon (glowing rails, particle bursts).
+- **Sound**: synthesized in code, so there are no audio files.
 
 ## Cues
 

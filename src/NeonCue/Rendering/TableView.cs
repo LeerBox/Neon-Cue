@@ -14,7 +14,7 @@ sealed class TableView : IDisposable
     public float OY { get; private set; }
 
     Bitmap? cache;
-    (Size size, float scale, float ox, float oy) cacheKey;
+    (Size size, float scale, float ox, float oy, TableStyle style) cacheKey;
 
     public void Layout(RectangleF area)
     {
@@ -38,14 +38,18 @@ sealed class TableView : IDisposable
 
     public void DrawBackground(Graphics g, Size client)
     {
-        var key = (client, Scale, OX, OY);
+        var key = (client, Scale, OX, OY, Look.Style);
         if (cache == null || cacheKey != key)
         {
             cache?.Dispose();
             cache = new Bitmap(Math.Max(1, client.Width), Math.Max(1, client.Height), PixelFormat.Format32bppPArgb);
-            using var cg = Graphics.FromImage(cache);
-            Theme.Setup(cg);
-            DrawScene(cg, client);
+            if (Look.Realistic) RealTable.Render(cache, this);
+            else
+            {
+                using var cg = Graphics.FromImage(cache);
+                Theme.Setup(cg);
+                DrawScene(cg, client);
+            }
             cacheKey = key;
         }
         g.DrawImageUnscaled(cache, 0, 0);

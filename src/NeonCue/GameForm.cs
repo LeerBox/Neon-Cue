@@ -22,6 +22,7 @@ sealed class GameForm : Form, IHost
     {
         Settings = AppSettings.Load();
         Sound = new SoundFx { Enabled = Settings.Sound };
+        Look.Style = Settings.Style;
 
         Text = "Neon Cue";
         ClientSize = new Size(1280, 800);

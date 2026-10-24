@@ -20,6 +20,7 @@ static class Snapshot
     public static void Render(string path, string what)
     {
         var host = new HeadlessHost();
+        if (Enum.TryParse<Rendering.TableStyle>(Environment.GetEnvironmentVariable("NEONCUE_STYLE"), out var st)) Rendering.Look.Style = st;
         using var bmp = new Bitmap(1280, 800, PixelFormat.Format32bppArgb);
         using var g = Graphics.FromImage(bmp);
         IScreen screen;

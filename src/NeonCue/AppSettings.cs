@@ -1,5 +1,6 @@
 using System.Text.Json;
 using NeonCue.Core;
+using NeonCue.Rendering;
 
 namespace NeonCue;
 
@@ -15,6 +16,7 @@ public sealed class AppSettings
     public int TargetScore { get; set; } = 50;
     public AimGuide Guide { get; set; } = AimGuide.Full;
     public bool Sound { get; set; } = true;
+    public TableStyle Style { get; set; } = TableStyle.Classic;
 
     public int Coins { get; set; } = 300;
     public List<string> OwnedCues { get; set; } = ["house"];
