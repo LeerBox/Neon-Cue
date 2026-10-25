@@ -519,14 +519,18 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (dist <= GripRadius) return;
 
-        // Moving straight in towards the cue ball is reaching for it, not aiming.
-        bool reaching = radialMove < 0 && -radialMove > 1.2 * Math.Abs(tangMove);
-        if (reaching) return;
+        // Moving in towards the cue ball is reaching for it, not aiming. A jump (first move, window
+        // re-entry) always aims.
+        bool jump = move.Length * view.Scale > 80;
+        bool inward = !jump && radialMove < 0;
+        if (inward && -radialMove > 0.8 * Math.Abs(tangMove)) return;
 
         rawAim = rel.Angle;
         aimSetDist = dist;
         aimAngle = rawAim;
-        if (dist >= TrustedAimDist) MarkTrustedAim();
+        // Only sideways/outward sweeps far from the cue ball are trusted for a press on the cue ball;
+        // anything drifting inwards may be the hand on its way over.
+        if (dist >= TrustedAimDist && !inward) MarkTrustedAim();
         else lastNearAimTime = clock;
     }
 
