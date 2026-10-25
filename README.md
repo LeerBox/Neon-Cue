@@ -27,7 +27,7 @@ playing them out in that same engine.
   - The table has varnished wood rails with grain, lamp-lit cloth with fibre texture, felt-covered cushions, leather pockets, mother-of-pearl diamonds and an oak floor that catches the table's shadow.
   - Each cue is built from its materials: maple or carbon-fibre shafts; walnut, ebony, cocobolo or purpleheart forearms; inlaid points; linen, leather or snakeskin wraps; and gold or silver rings.
 - **Table styles**: Classic green, Tournament blue, Royal burgundy, or Neon (glowing rails, particle bursts).
-- **Sound**: synthesized in code, so there are no audio files.
+- **Sound**: synthesized in code, so there are no audio files. A built-in mixer plays every hit on its own voice, so on the break dozens of clicks overlap naturally. Loudness follows impact speed, stereo panning follows the ball's position, pitch varies slightly per hit, and the balls make a rolling rumble.
 
 ## Cues
 

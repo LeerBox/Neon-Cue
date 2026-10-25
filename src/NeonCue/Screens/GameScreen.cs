@@ -203,7 +203,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         dragPower = 0;
         state.BallInHand = false;
         hintTask = null;
-        host.Sound.Cue(power);
+        host.Sound.Cue(power, state.Cue.Pos.X / Table.Width);
         if (!Look.Realistic) fx.Burst(state.Cue.Pos - Vec2.FromAngle(angle) * R, Theme.Cyan, 8 + (int)(power * 14), 90 + power * 160, 1.8f);
     }
 
@@ -307,6 +307,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
 
         SyncRolling();
+        UpdateRollingSound();
         UpdateAimDwell();
         UpdatePreview();
         if (hintTask is { IsCompleted: true }) ApplyHint();
@@ -405,11 +406,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     public void BallCollision(Ball a, Ball b, double impactSpeed)
     {
-        if (impactSpeed > 40) host.Sound.Clack(impactSpeed);
+        host.Sound.Clack(impactSpeed, (a.Pos.X + b.Pos.X) / 2 / Table.Width);
         if (impactSpeed > 700 && !Look.Realistic) fx.Burst((a.Pos + b.Pos) / 2, Theme.Mix(Theme.Cyan, Color.White, 0.3), 4, impactSpeed * 0.12, 1.4f);
     }
 
-    public void CushionHit(Ball ball, double impactSpeed) => host.Sound.Cushion(impactSpeed);
+    public void CushionHit(Ball ball, double impactSpeed) => host.Sound.Cushion(impactSpeed, ball.Pos.X / Table.Width);
 
     public void BallPocketed(Ball ball, Pocket pocket)
     {
@@ -421,7 +422,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             fx.Burst(pocket.DrawCenter, Theme.Magenta, 10, 180, 1.6f);
             fx.Pulse(pocket.DrawCenter, c, 30);
         }
-        host.Sound.Pocket();
+        host.Sound.Pocket(pocket.DrawCenter.X / Table.Width);
     }
 
     // ================================================================== hint (AI coach)
@@ -591,6 +592,15 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     int PowerStep(double power) => Math.Clamp((int)Math.Round(power * PreviewSteps), 1, PreviewSteps);
+
+    void UpdateRollingSound()
+    {
+        double total = 0;
+        if (phase == Phase.Rolling && !paused)
+            foreach (var b in state.Balls)
+                if (b.IsMoving) total += b.Vel.Length;
+        host.Sound.Rolling(total);
+    }
 
     /// <summary>Called every frame: a resting cursor settles the aim, with the aim assist.</summary>
     void UpdateAimDwell()

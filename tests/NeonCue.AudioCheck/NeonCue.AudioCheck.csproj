@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NeonCue.Core\NeonCue.Core.csproj" />
+    <Compile Include="..\..\src\NeonCue\Audio\Mixer.cs" Link="Audio\Mixer.cs" />
+    <Compile Include="..\..\src\NeonCue\Audio\SoundBank.cs" Link="Audio\SoundBank.cs" />
+  </ItemGroup>
+
+</Project>
