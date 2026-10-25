@@ -19,4 +19,3 @@ ideal% = pot rate of a perfect stroke along the guide; ui% = pot rate through th
 lost = pots the perfect stroke makes but the controlled stroke missed; aimErr = mean stick-angle error at release.
 Ungated rows: no fine-tune with assist Off/Light (raw hand precision) and the House Cue (wobble by design).
 RESULT: PASS
-Post job cleanup.
