@@ -526,7 +526,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         // Smoothed motion over the last few moves, so hand shake can't fake a sideways sweep.
         radialTrend = jump ? 0 : 0.6 * radialTrend + 0.4 * radialMove * view.Scale;
         tangTrend = jump ? 0 : 0.6 * tangTrend + 0.4 * Math.Abs(tangMove) * view.Scale;
-        bool inward = !jump && radialMove < 0;
+        bool inward = !jump && radialMove * view.Scale < -1; // more than a pixel of rounding
         if (inward && -radialMove > 0.8 * Math.Abs(tangMove)) return;
         bool trendingIn = radialTrend < -1 && -radialTrend > 0.5 * tangTrend;
 
