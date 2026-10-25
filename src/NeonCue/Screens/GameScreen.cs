@@ -145,6 +145,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     bool aimDwellPending;
     const double TrustedAimDist = 10 * R;     // aims set this far out are deliberate, never reach noise
     double trustedAim = Math.PI, trustedAimTime = -1, lastNearAimTime = -1;
+    double radialTrend, tangTrend;
     bool pressedOnCue;
     double aimSetDist;
 
@@ -522,15 +523,19 @@ sealed class GameScreen : IScreen, IPhysicsListener
         // Moving in towards the cue ball is reaching for it, not aiming. A jump (first move, window
         // re-entry) always aims.
         bool jump = move.Length * view.Scale > 80;
+        // Smoothed motion over the last few moves, so hand shake can't fake a sideways sweep.
+        radialTrend = jump ? 0 : 0.6 * radialTrend + 0.4 * radialMove * view.Scale;
+        tangTrend = jump ? 0 : 0.6 * tangTrend + 0.4 * Math.Abs(tangMove) * view.Scale;
         bool inward = !jump && radialMove < 0;
         if (inward && -radialMove > 0.8 * Math.Abs(tangMove)) return;
+        bool trendingIn = radialTrend < -1 && -radialTrend > 0.5 * tangTrend;
 
         rawAim = rel.Angle;
         aimSetDist = dist;
         aimAngle = rawAim;
         // Only sideways/outward sweeps far from the cue ball are trusted for a press on the cue ball;
         // anything drifting inwards may be the hand on its way over.
-        if (dist >= TrustedAimDist && !inward) MarkTrustedAim();
+        if (dist >= TrustedAimDist && !inward && !trendingIn) MarkTrustedAim();
         else lastNearAimTime = clock;
     }
 
