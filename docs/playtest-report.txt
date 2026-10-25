@@ -1,18 +1,22 @@
-Neon Cue play-test - 100 set-up pots per row, driven through the real mouse/keyboard handlers
+Neon Cue play-test - 40 set-up pots per row, driven through the real mouse/keyboard handlers
 
-cue     gesture            guide     spin range  ideal%   ui%  lost wrong1st  aimErr
-royale  PreciseFromTarget  Full       0.0 normal     98    97     1        0   0.00°
-royale  SloppyToCueBall    Full       0.0 normal     96    96     0        0   0.00°
-royale  SloppyToCueBall    Full       0.6 normal     96    96     0        0   0.00°
-royale  SloppyToCueBall    Full       0.0 close      95    89     6        0   0.33°
-royale  KeysThenCueBall    Off        0.0 normal     96    96     0        0   0.01°
-royale  KeysThenCueBall    Off        0.0 close      95    95     0        0   0.01°
-royale  BallInHand         Full       0.0 normal     96    96     0        0   0.00°
-royale  SloppyToCueBall    Off        0.0 normal     96    40    56        0   0.35°
-house   SloppyToCueBall    Full       0.0 normal     96    83    13        0   0.00°
-house   KeysThenCueBall    Off        0.0 normal     96    81    15        0   0.01°
+cue     gesture            assist  spin range  ideal%   ui%  lost wrong1st  aimErr
+royale  FreeFollow         Light               cue lag behind cursor while sweeping: mean 0.00°, worst 0.00°
+royale  PreciseFromTarget  Light    0.0 normal     95    95     0        0   0.00°
+royale  SloppyToCueBall    Strong   0.0 normal     98    98     0        0   0.00°
+royale  SloppyToCueBall    Strong   0.6 normal     98    98     0        0   0.00°
+royale  SloppyToCueBall    Strong   0.0 close     100   100     0        0   0.00°
+royale  SloppyToCueBall    Light    0.0 normal     98    73    10        0   0.18°
+royale  QuickSweep         Light    0.0 normal     98    98     0        0   0.07°
+royale  KeysThenCueBall    Off      0.0 normal     98    98     0        0   0.01°
+royale  KeysThenCueBall    Off      0.0 close     100   100     0        0   0.01°
+royale  BallInHand         Strong   0.0 normal     98    98     0        0   0.00°
+royale  SloppyToCueBall    Off      0.0 normal     98    40    23        0   0.41°
+house   SloppyToCueBall    Strong   0.0 normal     98    78     8        0   0.00°
+house   KeysThenCueBall    Off      0.0 normal     98    85     5        0   0.01°
 
 ideal% = pot rate of a perfect stroke along the guide; ui% = pot rate through the controls;
 lost = pots the perfect stroke makes but the controlled stroke missed; aimErr = mean stick-angle error at release.
-Ungated rows: guide Off without fine-tune (raw mouse precision) and the House Cue (wobble by design).
+Ungated rows: no fine-tune with assist Off/Light (raw hand precision) and the House Cue (wobble by design).
 RESULT: PASS
+Post job cleanup.

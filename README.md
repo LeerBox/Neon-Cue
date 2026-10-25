@@ -19,7 +19,7 @@ playing them out in that same engine.
 - **Real physics**: fixed-step ball/ball and cushion collisions, rolling friction, follow/draw and side spin, and pocket jaws that can rattle a ball out.
 - **Aim guides**: off, ghost ball, or full prediction (object-ball path, cue-ball tangent, and a highlight on the target pocket).
 - **Smart aiming**:
-  - **Pocket magnet**: an aim within a few pixels of a potting line snaps onto it exactly (strong with Full, light with Ghost ball, none with Off).
+  - **Aim assist** (menu: Off / Light / Strong): when the cursor rests, an aim within a few pixels of a potting line snaps onto it exactly. It never acts while you are moving, so the cue stays free.
   - **Power preview**: the aimed shot is simulated at 20 power levels in the background. Green ticks on the power bar show which powers pot the ball. The pocket lights green only when the current aim *and* power pot it, and amber when the line is right but the power isn't, with a marker where the ball would stop.
 - **Match options**: race to 1/3/5/7/9, straight-pool target 25–150, ball in hand, three-foul rule, and an 8-ball break that must go from the kitchen after a scratch.
 - **Realistic graphics, all generated in code (no image files)**:
@@ -75,7 +75,8 @@ Headless benchmark (`tests/NeonCue.Sim`, CPU vs CPU), share of non-break shots t
 
 | Action | Input |
 |---|---|
-| Aim | Point at the target and rest the cursor for a moment. Moving quickly to the cue ball afterwards doesn't change the aim |
+| Aim | The cue follows the mouse freely as you sweep around the cue ball. Moving in to grab the cue ball doesn't change the aim |
+| Precise aim | Hold Ctrl and move the mouse: the cue turns at a tenth of the normal speed |
 | Shoot | Press anywhere (on the cue ball or on the target), drag back, release (further = harder) |
 | Fine aim | Mouse wheel or ← → (0.03° per step, Shift = 0.23°); stays locked until you aim somewhere else |
 | Keyboard shot | ↑ ↓ power, Space to shoot |
