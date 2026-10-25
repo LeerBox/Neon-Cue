@@ -11,14 +11,9 @@ sealed class SoundFx : IDisposable
 {
     readonly Mixer mixer = new();
     readonly SoundBank bank = new();
-    readonly WaveOut output;
     readonly Random rng = new();
+    WaveOut? output;
     bool enabled = true;
-
-    public SoundFx()
-    {
-        output = new WaveOut(mixer);
-    }
 
     public bool Enabled
     {
@@ -42,11 +37,13 @@ sealed class SoundFx : IDisposable
 
     void Play(float[] sound, double gain, double x01, double pitchSpread)
     {
-        if (!enabled || !output.IsOpen) return;
+        if (!enabled) return;
+        output ??= new WaveOut(mixer); // opened on first use, so silent tools never touch the device
+        if (!output.IsOpen) return;
         double pan = 0.5 + (Math.Clamp(x01, 0, 1) - 0.5) * 0.7; // gentle stereo, never hard left/right
         double pitch = 1 + (rng.NextDouble() * 2 - 1) * pitchSpread;
         mixer.Play(sound, gain, pan, pitch);
     }
 
-    public void Dispose() => output.Dispose();
+    public void Dispose() => output?.Dispose();
 }
