@@ -6,6 +6,7 @@ using NeonCue.Rendering;
 namespace NeonCue;
 
 public enum AimGuide { Off, GhostBall, Full }
+public enum AimAssist { Off, Light, Strong }
 
 /// <summary>Menu choices, remembered between sessions in %AppData%\NeonCue.</summary>
 public sealed class AppSettings
@@ -16,6 +17,7 @@ public sealed class AppSettings
     public int RaceTo { get; set; } = 3;
     public int TargetScore { get; set; } = 50;
     public AimGuide Guide { get; set; } = AimGuide.Full;
+    public AimAssist Assist { get; set; } = AimAssist.Light;
     public bool Sound { get; set; } = true;
     public TableStyle Style { get; set; } = TableStyle.Classic;
 

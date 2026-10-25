@@ -99,6 +99,12 @@ sealed class MenuScreen : IScreen
         });
         rows.Add(new Row
         {
+            Label = "AIM ASSIST",
+            Value = () => cfg.Assist switch { AimAssist.Off => "Off (free aim)", AimAssist.Light => "Light", _ => "Strong" },
+            Change = d => cfg.Assist = (AimAssist)(((int)cfg.Assist + d + 3) % 3),
+        });
+        rows.Add(new Row
+        {
             Label = "TABLE STYLE",
             Value = () => Look.Name(cfg.Style),
             Change = d =>
@@ -151,10 +157,10 @@ sealed class MenuScreen : IScreen
         size = s;
         u = Math.Clamp(Math.Min(s.Width / 1280f, s.Height / 800f), 0.75f, 2.2f);
         float cx = s.Width / 2f;
-        float w = 620 * u, h = 46 * u, gap = 6 * u, y = 204 * u;
+        float w = 620 * u, h = 42 * u, gap = 5 * u, y = 202 * u;
         for (int i = 0; i < rows.Count; i++)
             rows[i].Rect = new RectangleF(cx - w / 2, y + i * (h + gap), w, h);
-        float by = y + rows.Count * (h + gap) + 46 * u;
+        float by = y + rows.Count * (h + gap) + 44 * u;
         buttons[0].Rect = new RectangleF(cx - 150 * u, by, 300 * u, 60 * u);
         buttons[1].Rect = new RectangleF(cx - 295 * u, by + 72 * u, 190 * u, 44 * u);
         buttons[2].Rect = new RectangleF(cx - 95 * u, by + 72 * u, 190 * u, 44 * u);
@@ -258,7 +264,7 @@ sealed class MenuScreen : IScreen
         string controls =
             "Aim — move the mouse; the cue follows it.\n" +
             "Shoot — press (on the cue ball or the target), drag back, release. Further = harder.\n" +
-            "Fine aim — mouse wheel or ← →  (hold Shift for big steps).\n" +
+            "Fine aim — mouse wheel or ← →  (hold Shift for big steps); hold Ctrl and move for precise aim.\n" +
             "Keyboard shot — ↑ ↓ set power, Space shoots.\n" +
             "Spin — click the cue ball widget (bottom right) or W A S D. R resets.\n" +
             "Ball in hand — move the cue ball, click to place; click it again to pick up.\n" +

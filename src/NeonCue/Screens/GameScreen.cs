@@ -143,7 +143,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
     int previewVersion;
     (double aim, double side, double top, Vec2 cue, int shot) previewKey;
     bool aimDwellPending;
-    const double SlowAimSpeed = 350;          // px/s: slower than this is aiming, faster is travelling
+    const double TrustedAimDist = 10 * R;     // aims set this far out are deliberate, never reach noise
+    double trustedAim = Math.PI, trustedAimTime = -1, lastNearAimTime = -1;
     bool pressedOnCue;
     double aimSetDist;
 
@@ -157,6 +158,9 @@ sealed class GameScreen : IScreen, IPhysicsListener
         phaseTime = 0;
         aimLocked = false;
         aimSetDist = 0;
+        trustedAim = aimAngle;
+        trustedAimTime = clock;
+        lastNearAimTime = -1;
         lastMouseWorld = mouseWorld;
         if (state.RackOver)
         {
@@ -481,35 +485,56 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     /// <summary>
-    /// Hover aiming, modelled on how people aim: the line follows the cursor while it moves slowly
-    /// (aiming) and commits when it comes to rest; quick moves (reaching for the cue ball) never
-    /// change it, nor does anything inside the grip zone around the cue ball. Fine-tuned aims stay
-    /// locked until the cursor deliberately moves sideways; the pocket magnet settles near-perfect lines.
+    /// Hover aiming. The cue follows the cursor freely as you sweep around the cue ball; the only
+    /// motion it ignores is reaching in towards the cue ball (to grab it and pull back). Resting the
+    /// cursor applies the aim assist; holding Ctrl turns cursor motion into slow, precise rotation.
     /// </summary>
     void OnAimMouseMove()
     {
-        double now = clock;
-        double dtMove = Math.Max(1e-3, now - lastMoveTime);
-        double movedPx = (mouseWorld - lastMouseWorld).Length * view.Scale;
-        double speed = movedPx / dtMove;
-        lastMoveTime = now;
+        Vec2 move = mouseWorld - lastMouseWorld;
+        lastMoveTime = clock;
         aimDwellPending = true;
 
         Vec2 rel = mouseWorld - state.Cue.Pos;
         double dist = rel.Length;
+        if (dist <= AimFreezeRadius) return;
+        Vec2 radial = rel / dist;
+        double radialMove = Vec2.Dot(move, radial);
+        double tangMove = Vec2.Cross(radial, move);
+
+        if ((Control.ModifierKeys & Keys.Control) != 0)
+        {
+            // Precision: sideways motion turns the cue at a tenth of the normal rate.
+            SetManualAim(aimAngle + tangMove / dist * 0.1);
+            return;
+        }
+
         if (aimLocked)
         {
-            // A fine-tuned aim only unlocks when the cursor clearly points somewhere else.
+            // A fine-tuned aim unlocks as soon as the cursor clearly points somewhere else.
             double off = Math.Abs(Math.IEEERemainder(rel.Angle - aimAngle, 2 * Math.PI));
-            double allowed = Math.Max(3 * Math.PI / 180, 25 / Math.Max(1, dist * view.Scale));
+            double allowed = Math.Max(1.5 * Math.PI / 180, 12 / Math.Max(1, dist * view.Scale));
             if (dist <= GripRadius || off < allowed) return;
             aimLocked = false;
         }
+        if (dist <= GripRadius) return;
 
-        // Moving in closer than where the aim was set is reaching for the cue ball, not aiming.
-        double radialMove = dist > 1e-6 ? Vec2.Dot(mouseWorld - lastMouseWorld, rel / dist) : 0;
-        bool reaching = radialMove < 0 && dist < aimSetDist * 0.98;
-        if (speed < SlowAimSpeed && dist > GripRadius && !reaching) CommitAim();
+        // Moving straight in towards the cue ball is reaching for it, not aiming.
+        bool reaching = radialMove < 0 && -radialMove > 1.2 * Math.Abs(tangMove);
+        if (reaching) return;
+
+        rawAim = rel.Angle;
+        aimSetDist = dist;
+        aimAngle = rawAim;
+        if (dist >= TrustedAimDist) MarkTrustedAim();
+        else lastNearAimTime = clock;
+    }
+
+    /// <summary>The aim the player clearly meant: set far from the cue ball, at rest, or fine-tuned.</summary>
+    void MarkTrustedAim()
+    {
+        trustedAim = aimAngle;
+        trustedAimTime = clock;
     }
 
     /// <summary>
@@ -558,7 +583,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     int PowerStep(double power) => Math.Clamp((int)Math.Round(power * PreviewSteps), 1, PreviewSteps);
 
-    /// <summary>Called every frame: a resting cursor commits the aim it points at.</summary>
+    /// <summary>Called every frame: a resting cursor settles the aim, with the aim assist.</summary>
     void UpdateAimDwell()
     {
         if (!aimDwellPending || aimLocked || dragging || !HumanTurn || phase != Phase.Aiming) return;
@@ -571,19 +596,16 @@ sealed class GameScreen : IScreen, IPhysicsListener
         if (dist > AimFreezeRadius) CommitAim();
     }
 
+    /// <summary>Aims exactly at the cursor (with the aim assist) and trusts the result.</summary>
     void CommitAim()
     {
         Vec2 rel = mouseWorld - state.Cue.Pos;
         double dist = rel.Length;
         if (dist <= AimFreezeRadius) return;
-        // A change smaller than one pixel's worth of angle at this radius is rounding noise,
-        // unless the cursor is at least as far out as when the aim was last set.
-        double pixelNoise = 1.2 / Math.Max(1, dist * view.Scale);
-        double delta = Math.Abs(Math.IEEERemainder(rel.Angle - rawAim, 2 * Math.PI));
-        if (delta <= pixelNoise && dist < aimSetDist * 0.97) return;
         rawAim = rel.Angle;
         aimSetDist = dist;
         aimAngle = Magnet(rawAim, dist * view.Scale);
+        MarkTrustedAim();
     }
 
     void SetManualAim(double angle)
@@ -592,19 +614,21 @@ sealed class GameScreen : IScreen, IPhysicsListener
         rawAim = angle;
         aimLocked = true;
         aimDwellPending = false;
+        MarkTrustedAim();
     }
 
     /// <summary>
     /// Aim assist: if the hover aim is within a hair of a line that pots a legal ball, use that exact
-    /// line. Strength follows the aim-guide setting (Full, then Ghost ball, Off = none).
+    /// line. Applied only when the cursor rests or the stroke starts, never while you sweep;
+    /// strength follows the Aim assist setting (Strong, Light, Off).
     /// </summary>
     double Magnet(double raw, double cursorDistPx)
     {
         // Tolerance covers a few pixels of hand slip at any distance (and at least a fixed angle).
-        double window = cfg.Guide switch
+        double window = cfg.Assist switch
         {
-            AimGuide.Full => Math.Clamp(4.0 / Math.Max(1, cursorDistPx), 1.0 * Math.PI / 180, 4.5 * Math.PI / 180),
-            AimGuide.GhostBall => Math.Clamp(1.5 / Math.Max(1, cursorDistPx), 0.4 * Math.PI / 180, 1.5 * Math.PI / 180),
+            AimAssist.Strong => Math.Clamp(4.0 / Math.Max(1, cursorDistPx), 1.0 * Math.PI / 180, 4.5 * Math.PI / 180),
+            AimAssist.Light => Math.Clamp(2.0 / Math.Max(1, cursorDistPx), 0.3 * Math.PI / 180, 1.5 * Math.PI / 180),
             _ => 0,
         };
         if (window <= 0) return raw;
@@ -685,6 +709,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
             double toCue = Vec2.Distance(mouseWorld, state.Cue.Pos);
             // Pressing away from the cue ball commits the aim right there (unless fine-tuned).
             if (toCue > GripRadius && !aimLocked) CommitAim();
+            // Pressing on the cue ball right after the cursor travelled in close: that was the hand
+            // reaching over, so shoot the line the player last clearly set.
+            else if (toCue <= GripRadius && !aimLocked && lastNearAimTime > trustedAimTime && clock - lastNearAimTime < 0.6)
+                aimAngle = trustedAim;
             pressedOnCue = state.BallInHand && toCue < R * 1.6;
             dragging = true;
             dragStart = mouseWorld;
@@ -1121,8 +1149,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 ? "BALL IN HAND — place the cue ball behind the head string, then click"
                 : "BALL IN HAND — move the cue ball anywhere, then click to place",
             Phase.Aiming when HumanTurn => state.BallInHand
-                ? "Drag back & release to shoot  •  click the cue ball to move it  •  H: coach"
-                : "Aim with the mouse  •  drag back & release to shoot  •  wheel / ←→ fine aim  •  H: coach",
+                ? "Drag back & release to shoot  •  click the cue ball to move it  •  Ctrl: precise aim  •  H: coach"
+                : "Aim with the mouse  •  drag back & release  •  Ctrl: precise aim  •  wheel / ←→ fine aim  •  H: coach",
             Phase.AIThinking or Phase.AIAiming or Phase.AIPlacing => $"{state.CurrentPlayer.Name} is planning the shot…  (F: fast forward)",
             Phase.Rolling => fastForward ? "Fast forward ON" : "",
             _ => "",
@@ -1280,9 +1308,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal bool IsPlacing => phase == Phase.Placing;
     internal ShotEvents LastEvents => events;
     internal PointF ToScreen(Vec2 w) => view.ToScreen(w);
+    internal Vec2 ToWorldPublic(PointF p) => view.ToWorld(p);
     internal void DebugBeginTurn() { SyncRolling(); BeginTurn(); }
     internal void DebugSetSpin(double side, double top) { spinSide = side; spinTop = top; }
     internal void DebugSetGuide(AimGuide guide) => cfg.Guide = guide;
+    internal void DebugSetAssist(AimAssist assist) => cfg.Assist = assist;
 
     /// <summary>What the aim guide currently promises: first ball hit and its departure direction.</summary>
     internal (int ball, Vec2 objDir)? PredictedHit()

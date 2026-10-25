@@ -17,9 +17,11 @@ static class PlayTest
         SloppyToCueBall,     // +-2px pointing, wobbly path to the cue ball, press there, drag back
         KeysThenCueBall,     // rough pointing, arrow-key fine-tune, wobbly path to the cue ball
         BallInHand,          // place by click, check pick-up, then sloppy pull from the cue ball
+        QuickSweep,          // fast arcs around the cue ball ending on the target, no pause, then reach and pull
+        FreeFollow,          // sweep the cursor around; the cue must follow it closely the whole time
     }
 
-    sealed record Row(string Cue, Gesture Gesture, AimGuide Guide, double Side, bool Close, bool Gated);
+    sealed record Row(string Cue, Gesture Gesture, AimGuide Guide, double Side, bool Close, bool Gated, AimAssist Assist = AimAssist.Light);
 
     sealed class Host : IHost
     {
@@ -34,7 +36,7 @@ static class PlayTest
     sealed class Tally
     {
         public int N, IdealPots, UiPots, LostPots, WrongFirst;
-        public double AimErrSum;
+        public double AimErrSum, FollowWorst;
         public readonly HashSet<string> Failures = new();
     }
 
@@ -43,16 +45,19 @@ static class PlayTest
     {
         Row[] rows =
         [
+            new("royale", Gesture.FreeFollow, AimGuide.Full, 0, false, true),
             new("royale", Gesture.PreciseFromTarget, AimGuide.Full, 0, false, true),
-            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, true),
-            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0.6, false, true),
-            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, true, true),
-            new("royale", Gesture.KeysThenCueBall, AimGuide.Off, 0, false, true),
-            new("royale", Gesture.KeysThenCueBall, AimGuide.Off, 0, true, true),
-            new("royale", Gesture.BallInHand, AimGuide.Full, 0, false, true),
-            new("royale", Gesture.SloppyToCueBall, AimGuide.Off, 0, false, false),
-            new("house", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, false),
-            new("house", Gesture.KeysThenCueBall, AimGuide.Off, 0, false, false),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, true, AimAssist.Strong),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0.6, false, true, AimAssist.Strong),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, true, true, AimAssist.Strong),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, false, AimAssist.Light),
+            new("royale", Gesture.QuickSweep, AimGuide.Full, 0, false, true),
+            new("royale", Gesture.KeysThenCueBall, AimGuide.Off, 0, false, true, AimAssist.Off),
+            new("royale", Gesture.KeysThenCueBall, AimGuide.Off, 0, true, true, AimAssist.Off),
+            new("royale", Gesture.BallInHand, AimGuide.Full, 0, false, true, AimAssist.Strong),
+            new("royale", Gesture.SloppyToCueBall, AimGuide.Off, 0, false, false, AimAssist.Off),
+            new("house", Gesture.SloppyToCueBall, AimGuide.Full, 0, false, false, AimAssist.Strong),
+            new("house", Gesture.KeysThenCueBall, AimGuide.Off, 0, false, false, AimAssist.Off),
         ];
 
         bool ok = true;
@@ -60,7 +65,7 @@ static class PlayTest
         {
             $"Neon Cue play-test - {trials} set-up pots per row, driven through the real mouse/keyboard handlers",
             "",
-            $"{"cue",-7} {"gesture",-18} {"guide",-9} {"spin",4} {"range",-6} {"ideal%",6} {"ui%",5} {"lost",5} {"wrong1st",8} {"aimErr",7}",
+            $"{"cue",-7} {"gesture",-18} {"assist",-7} {"spin",4} {"range",-6} {"ideal%",6} {"ui%",5} {"lost",5} {"wrong1st",8} {"aimErr",7}",
         };
         foreach (var row in rows)
         {
@@ -69,12 +74,18 @@ static class PlayTest
             for (int i = 0; i < trials; i++) Trial(row, rng, t);
             foreach (var f in t.Failures) lines.Add($"  FAIL: {f}");
             if (t.Failures.Count > 0 || (row.Gated && t.UiPots < 0.9 * t.IdealPots)) ok = false;
-            lines.Add($"{row.Cue,-7} {row.Gesture,-18} {row.Guide,-9} {row.Side,4:0.0} {(row.Close ? "close" : "normal"),-6} {100.0 * t.IdealPots / t.N,6:0} {100.0 * t.UiPots / t.N,5:0} {t.LostPots,5} {t.WrongFirst,8} {t.AimErrSum / t.N,6:0.00}°");
+            if (row.Gesture == Gesture.FreeFollow)
+            {
+                lines.Add($"{row.Cue,-7} {row.Gesture,-18} {row.Assist,-7} {"",4} {"",-6} cue lag behind cursor while sweeping: mean {t.AimErrSum / t.N:0.00}°, worst {t.FollowWorst:0.00}°");
+                if (t.FollowWorst > 0.5) ok = false;
+                continue;
+            }
+            lines.Add($"{row.Cue,-7} {row.Gesture,-18} {row.Assist,-7} {row.Side,4:0.0} {(row.Close ? "close" : "normal"),-6} {100.0 * t.IdealPots / t.N,6:0} {100.0 * t.UiPots / t.N,5:0} {t.LostPots,5} {t.WrongFirst,8} {t.AimErrSum / t.N,6:0.00}°");
         }
         lines.Add("");
         lines.Add("ideal% = pot rate of a perfect stroke along the guide; ui% = pot rate through the controls;");
         lines.Add("lost = pots the perfect stroke makes but the controlled stroke missed; aimErr = mean stick-angle error at release.");
-        lines.Add("Ungated rows: guide Off without fine-tune (raw mouse precision) and the House Cue (wobble by design).");
+        lines.Add("Ungated rows: no fine-tune with assist Off/Light (raw hand precision) and the House Cue (wobble by design).");
         lines.Add(ok ? "RESULT: PASS" : "RESULT: FAIL");
         File.WriteAllLines(reportPath, lines);
         return ok;
@@ -87,6 +98,7 @@ static class PlayTest
         host.Settings.OwnedCues = [row.Cue];
         host.Settings.EquippedCue = row.Cue;
         host.Settings.Guide = row.Guide;
+        host.Settings.Assist = row.Assist;
         var gs = new GameScreen(host);
         using var bmp = new Bitmap(1280, 800);
         using var g = Graphics.FromImage(bmp);
@@ -149,18 +161,50 @@ static class PlayTest
         var refEv = Physics.Simulate(refState.Balls);
         bool idealPot = refEv.Pocketed.Contains(1) && !refEv.CueScratched;
 
+        if (row.Gesture == Gesture.FreeFollow)
+        {
+            double worst = 0, sum = 0;
+            int n = 0;
+            double a0 = rng.NextDouble() * Math.PI * 2, radius = 140 + rng.NextDouble() * 200;
+            for (int k = 0; k <= 40; k++)
+            {
+                double a = a0 + k * 0.06 * (k < 20 ? 1 : -1);
+                var at = P(cuePos + Vec2.FromAngle(a) * radius);
+                Move(at);
+                double want = (gs.ToWorldPublic(at) - cuePos).Angle;
+                double lag = Math.Abs(Math.IEEERemainder(gs.AimAngle - want, 2 * Math.PI)) * 180 / Math.PI;
+                worst = Math.Max(worst, lag);
+                sum += lag;
+                n++;
+            }
+            t.N++;
+            t.AimErrSum += sum / n;
+            t.FollowWorst = Math.Max(t.FollowWorst, worst);
+            return;
+        }
+
         // Point at the ghost ball (or a little past it when it is very close to the cue ball).
         Vec2 aimDir = Vec2.FromAngle(aimNeeded);
         double pointDist = Math.Max(Vec2.Distance(cuePos, ghost), 4 * R);
         Vec2 pointAt = cuePos + aimDir * pointDist;
-        int sloppiness = row.Gesture switch { Gesture.PreciseFromTarget => 0, Gesture.KeysThenCueBall => 6, _ => 2 };
+        int sloppiness = row.Gesture switch { Gesture.PreciseFromTarget or Gesture.QuickSweep => 0, Gesture.KeysThenCueBall => 6, _ => 2 };
         var aimPx = Jitter(P(pointAt), sloppiness);
-        // Arrive at the target from outside, like a hand settling.
-        Move(new Point(aimPx.X + 30, aimPx.Y - 20));
-        Move(new Point(aimPx.X + 8, aimPx.Y - 4));
-        Move(aimPx);
-        // Humans look at the guide for a moment; PreciseFromTarget presses with no pause at all.
-        if (row.Gesture != Gesture.PreciseFromTarget)
+        if (row.Gesture == Gesture.QuickSweep)
+        {
+            // Swing round the cue ball onto the target at the same radius, no pause anywhere.
+            double r0 = Vec2.Distance(cuePos, pointAt), aimA = (pointAt - cuePos).Angle;
+            for (int k = 8; k >= 0; k--) Move(P(cuePos + Vec2.FromAngle(aimA + k * 0.05) * r0));
+            aimPx = P(pointAt);
+        }
+        else
+        {
+            // Arrive at the target from outside, like a hand settling.
+            Move(new Point(aimPx.X + 30, aimPx.Y - 20));
+            Move(new Point(aimPx.X + 8, aimPx.Y - 4));
+            Move(aimPx);
+        }
+        // Humans look at the guide for a moment; the precise and quick gestures press with no pause.
+        if (row.Gesture is not (Gesture.PreciseFromTarget or Gesture.QuickSweep))
             for (int k = 0; k < 12; k++) gs.Update(1 / 60.0);
 
         if (row.Gesture == Gesture.KeysThenCueBall)
