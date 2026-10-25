@@ -232,7 +232,7 @@ sealed class ShopScreen : IScreen
         if (i >= 0)
         {
             selected = i;
-            host.Sound.Click();
+            host.Sound.CuePreview(Selected.Id);
             if (e.Clicks >= 2 && cfg.Owns(Selected)) Act();
             return;
         }
@@ -247,10 +247,10 @@ sealed class ShopScreen : IScreen
         switch (k)
         {
             case Keys.Escape: host.ShowMenu(); return true;
-            case Keys.Left: selected = (selected + n - 1) % n; return true;
-            case Keys.Right: selected = (selected + 1) % n; return true;
-            case Keys.Up: selected = (selected + n - 2) % n; return true;
-            case Keys.Down: selected = (selected + 2) % n; return true;
+            case Keys.Left: selected = (selected + n - 1) % n; host.Sound.CuePreview(Selected.Id); return true;
+            case Keys.Right: selected = (selected + 1) % n; host.Sound.CuePreview(Selected.Id); return true;
+            case Keys.Up: selected = (selected + n - 2) % n; host.Sound.CuePreview(Selected.Id); return true;
+            case Keys.Down: selected = (selected + 2) % n; host.Sound.CuePreview(Selected.Id); return true;
             case Keys.Enter: case Keys.Space: Act(); return true;
         }
         return false;

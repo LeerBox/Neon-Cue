@@ -27,7 +27,8 @@ playing them out in that same engine.
   - The table has varnished wood rails with grain, lamp-lit cloth with fibre texture, felt-covered cushions, leather pockets, mother-of-pearl diamonds and an oak floor that catches the table's shadow.
   - Each cue is built from its materials: maple or carbon-fibre shafts; walnut, ebony, cocobolo or purpleheart forearms; inlaid points; linen, leather or snakeskin wraps; and gold or silver rings.
 - **Table styles**: Classic green, Tournament blue, Royal burgundy, or Neon (glowing rails, particle bursts).
-- **Sound**: synthesized in code, so there are no audio files. A built-in mixer plays every hit on its own voice, so on the break dozens of clicks overlap naturally. Loudness follows impact speed, stereo panning follows the ball's position, pitch varies slightly per hit, and the balls make a rolling rumble.
+- **Sound**: synthesized in code, so there are no audio files. A built-in mixer plays every hit on its own voice, so on the break dozens of clicks overlap naturally. Loudness follows impact speed, stereo panning follows the ball's position, and pitch varies slightly per hit. There is no background noise, only the knocks.
+- **Each cue has its own strike sound**, shaped by its materials: a dull wooden knock (House Cue), a clean maple tock (Starter), a sharp phenolic crack (Thunder Breaker), a glassy carbon tick (Carbon Phantom), and rich knocks with a ringing finish from gold or diamond fittings (Golden Dragon, Black Diamond Royale). Picking a cue in the shop plays its sound.
 
 ## Cues
 

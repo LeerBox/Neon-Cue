@@ -48,13 +48,26 @@ for (int f = 0; f < totalFrames; f += 512)
     while (next < events.Count && events[next].time * Mixer.SampleRate < f + n)
     {
         var (time, kind, gain) = events[next++];
-        float[] snd = kind switch { "clack" => bank.Clack, "cushion" => bank.Cushion, "pocket" => bank.Pocket, _ => bank.Cue };
+        float[] snd = kind switch { "clack" => bank.Clack, "cushion" => bank.Cushion, "pocket" => bank.Pocket, _ => bank.CueStrike("starter") };
         mixer.Play(snd, gain, 0.5, 1.0, (long)(time * Mixer.SampleRate));
     }
     mixer.Render(block, n);
     Array.Copy(block, 0, pcm, f * 2, n * 2);
 }
 int clipped = pcm.Count(v => Math.Abs((int)v) >= 32000);
+
+// Silence check: wherever no sound has started in the last 0.5 s, the output must be exactly zero.
+var starts = events.Select(e => (long)(e.time * Mixer.SampleRate)).OrderBy(x => x).ToArray();
+long hold = (long)(0.5 * Mixer.SampleRate);
+int noisy = 0, silentFrames = 0, si = 0;
+for (long f = 0; f < totalFrames; f++)
+{
+    while (si < starts.Length && starts[si] <= f) si++;
+    bool quiet = si == 0 || f - starts[si - 1] > hold;
+    if (!quiet) continue;
+    silentFrames++;
+    if (pcm[2 * f] != 0 || pcm[2 * f + 1] != 0) noisy++;
+}
 int peak = pcm.Max(v => Math.Abs((int)v));
 WriteWav(wavPath, pcm);
 
@@ -81,8 +94,39 @@ Console.WriteLine($"sound events in the break + 3 shots : {events.Count} ({audib
 Console.WriteLine($"OLD player (one sound at a time)    : played {oldPlayed}, skipped {audible - oldPlayed}, cut off early {oldCut}");
 Console.WriteLine($"NEW mixer                           : played {mixer.Started}, dropped {mixer.Dropped}, most at once {mixer.PeakVoices}");
 Console.WriteLine($"output peak {peak * 100 / 32767}% of full scale, clipped samples {clipped}");
+Console.WriteLine($"between hits: {silentFrames / (double)Mixer.SampleRate:0.0} s that should be silent, non-zero samples {noisy}");
+
+// Each cue's strike: brightness (zero-crossings/s), ring length (time to -40 dB), loudness.
+string cuesWav = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(wavPath))!, "cue-sounds.wav");
+var feats = new List<(string id, double zcr, double ms, double rms)>();
+var cueTrack = new List<short>();
+foreach (var c in CueCatalog.All)
+{
+    var x = bank.CueStrike(c.Id);
+    int zc = 0;
+    for (int i = 1; i < x.Length; i++) if (x[i - 1] < 0 != x[i] < 0) zc++;
+    float pk = x.Max(Math.Abs);
+    int last = Array.FindLastIndex(x, v => Math.Abs(v) > pk * 0.01f);
+    double rms = Math.Sqrt(x.Average(v => (double)v * v));
+    feats.Add((c.Id, zc / (x.Length / (double)Mixer.SampleRate), last * 1000.0 / Mixer.SampleRate, rms));
+    foreach (var v in x) { short q = (short)(v * 0.75f * 32000); cueTrack.Add(q); cueTrack.Add(q); }
+    cueTrack.AddRange(new short[(int)(0.6 * Mixer.SampleRate) * 2]);
+}
+WriteWav(cuesWav, cueTrack.ToArray());
+Console.WriteLine();
+Console.WriteLine($"{"cue",-9} {"bright Hz",9} {"length ms",9} {"rms",6}");
+foreach (var f in feats) Console.WriteLine($"{f.id,-9} {f.zcr,9:0} {f.ms,9:0} {f.rms,6:0.000}");
+int samePairs = 0;
+for (int i = 0; i < feats.Count; i++)
+    for (int j = i + 1; j < feats.Count; j++)
+    {
+        var a = feats[i]; var b = feats[j];
+        bool differ = Math.Abs(a.zcr - b.zcr) / Math.Max(a.zcr, b.zcr) > 0.08 || Math.Abs(a.ms - b.ms) / Math.Max(a.ms, b.ms) > 0.2;
+        if (!differ) { samePairs++; Console.WriteLine($"  too similar: {a.id} / {b.id}"); }
+    }
+Console.WriteLine($"wrote {cuesWav}");
 Console.WriteLine($"wrote {wavPath} ({totalFrames / (double)Mixer.SampleRate:0.0} s)");
-bool ok = mixer.Dropped == 0 && clipped == 0 && mixer.Started == events.Count(e => e.gain > 0.001);
+bool ok = mixer.Dropped == 0 && clipped == 0 && noisy == 0 && samePairs == 0 && mixer.Started == events.Count(e => e.gain > 0.001);
 Console.WriteLine(ok ? "RESULT: PASS" : "RESULT: FAIL");
 return ok ? 0 : 1;
 

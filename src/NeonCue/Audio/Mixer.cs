@@ -4,7 +4,7 @@ namespace NeonCue.Audio;
 
 /// <summary>
 /// Software mixer: any number of overlapping one-shot voices (with gain, stereo pan and pitch)
-/// plus a continuous rolling rumble, rendered to 16-bit stereo. Thread-safe to trigger from the
+/// rendered to 16-bit stereo. Silence between hits is true digital silence (no noise sources). Thread-safe to trigger from the
 /// game thread; <see cref="Render"/> runs on the audio thread (or offline in tests).
 /// </summary>
 public sealed class Mixer
@@ -23,10 +23,6 @@ public sealed class Mixer
 
     readonly ConcurrentQueue<Voice> incoming = new();
     readonly List<Voice> active = new();
-    readonly Random noise = new(11);
-    double brown;
-    float rollGain;
-    volatile float rollTarget;
     long frame;
 
     public float MasterGain { get; set; } = 0.75f;
@@ -51,9 +47,6 @@ public sealed class Mixer
             StartFrame = atFrame,
         });
     }
-
-    /// <summary>Loudness of the continuous ball-rolling rumble, 0..1 (smoothed internally).</summary>
-    public void SetRolling(double level) => rollTarget = (float)Math.Clamp(level, 0, 1);
 
     /// <summary>Mixes <paramref name="frames"/> stereo frames into <paramref name="dest"/> (interleaved L,R).</summary>
     public void Render(short[] dest, int frames)
@@ -87,16 +80,6 @@ public sealed class Mixer
                 l += s * v.GainL;
                 r += s * v.GainR;
                 v.Pos += v.Step;
-            }
-
-            // Rolling: brown noise, gain eased towards the target to avoid zipper noise.
-            rollGain += (rollTarget - rollGain) * 0.0008f;
-            if (rollGain > 0.0005f)
-            {
-                brown = brown * 0.985 + (noise.NextDouble() * 2 - 1) * 0.015;
-                float rumble = (float)(brown * 6) * rollGain;
-                l += rumble;
-                r += rumble;
             }
 
             dest[2 * i] = ToPcm(l * MasterGain);

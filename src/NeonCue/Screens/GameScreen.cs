@@ -203,7 +203,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         dragPower = 0;
         state.BallInHand = false;
         hintTask = null;
-        host.Sound.Cue(power, state.Cue.Pos.X / Table.Width);
+        host.Sound.Cue(power, state.Cue.Pos.X / Table.Width, stick.Id);
         if (!Look.Realistic) fx.Burst(state.Cue.Pos - Vec2.FromAngle(angle) * R, Theme.Cyan, 8 + (int)(power * 14), 90 + power * 160, 1.8f);
     }
 
@@ -307,7 +307,6 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
 
         SyncRolling();
-        UpdateRollingSound();
         UpdateAimDwell();
         UpdatePreview();
         if (hintTask is { IsCompleted: true }) ApplyHint();
@@ -592,15 +591,6 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     int PowerStep(double power) => Math.Clamp((int)Math.Round(power * PreviewSteps), 1, PreviewSteps);
-
-    void UpdateRollingSound()
-    {
-        double total = 0;
-        if (phase == Phase.Rolling && !paused)
-            foreach (var b in state.Balls)
-                if (b.IsMoving) total += b.Vel.Length;
-        host.Sound.Rolling(total);
-    }
 
     /// <summary>Called every frame: a resting cursor settles the aim, with the aim assist.</summary>
     void UpdateAimDwell()

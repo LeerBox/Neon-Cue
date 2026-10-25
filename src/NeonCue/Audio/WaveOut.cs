@@ -4,11 +4,12 @@ namespace NeonCue.Audio;
 
 /// <summary>
 /// Streams a <see cref="Mixer"/> to the default Windows audio device through winmm waveOut,
-/// with a ring of small buffers (constant ~46 ms latency) refilled by a dedicated thread.
+/// with a ring of small buffers (constant ~70 ms latency, enough slack that a busy frame never
+/// starves the device and crackles) refilled by a dedicated thread.
 /// </summary>
 public sealed class WaveOut : IDisposable
 {
-    const int Buffers = 4;
+    const int Buffers = 6;
     const int FramesPerBuffer = 512;
     const uint WHDR_DONE = 0x1;
     const int HeaderSize = 48;    // WAVEHDR on x64
