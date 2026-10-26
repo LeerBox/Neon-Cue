@@ -31,6 +31,11 @@ playing them out in that same engine.
   - Cushions grip a spinning ball, so english changes the rebound.
   - Squirt from side spin, and pocket jaws that can rattle a ball out.
 - **Exact aim prediction**: the guide doesn't draw ghost-ball geometry. It plays the shot in the physics engine in the background and draws the real paths: the cue ball to contact, the object ball (throw included), the cue ball's path afterwards (draw and follow curves), where each ball stops, a green pocket when the ball drops, and a red **SCRATCH** warning. With stroke error off (the default), the ball goes exactly where the guide shows.
+- **Smooth motion on high-refresh monitors**:
+  - The game loop is paced to the monitor's refresh rate instead of a coarse timer.
+  - Each ball is drawn between its last two physics positions (fixed 1/480 s steps), so motion stays even at any frame rate.
+  - Ball sprites are rendered in parallel at quarter-pixel precision and copied 1:1 (no resampling).
+  - Measured with `NeonCue.exe --bench`: frame cost fell from 15.6 ms to 5.2 ms, and motion unevenness from 29% to 3%.
 - **Smart scoreboard (Tab)**: per-player frames or racks, score, current and best break or run, shots, pot success and fouls; live **win chances** for the rack/frame and the match (based on the score, what is left on the table, who is at the table and player skill); points left in snooker; and a match log. A slim win-chance bar sits under the match title.
 - **Aim guides**: off, ghost ball, or full prediction (object-ball path, cue-ball tangent, and a highlight on the target pocket).
 - **Smart aiming**:

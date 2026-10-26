@@ -231,7 +231,7 @@ sealed class MenuScreen : IScreen
         var cue = cfg.Equipped;
         Gfx.Text(g, $"COINS  {cfg.Coins:N0}", Theme.F(18 * u, FontStyle.Bold), Theme.Amber, new RectangleF(s.Width - 336 * u, 20 * u, 310 * u, 26 * u), StringAlignment.Far);
         Gfx.Text(g, $"CUE  {cue.Name}", Theme.F(14 * u, FontStyle.Bold), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 336 * u, 46 * u, 310 * u, 22 * u), StringAlignment.Far);
-        Gfx.Text(g, "v1.9", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
+        Gfx.Text(g, "v1.10", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
     }
