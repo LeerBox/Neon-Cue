@@ -8,6 +8,7 @@ playing them out in that same engine.
 ![Classic green table](docs/gameplay.png)
 ![Tournament blue table](docs/table-blue.png)
 ![Snooker](docs/snooker.png)
+![Scoreboard](docs/scoreboard.png)
 ![Cue shop](docs/shop.png)
 
 ## Features
@@ -23,7 +24,14 @@ playing them out in that same engine.
 - **4 AI levels**: Rookie, Amateur, Pro and Master. Each level searches more shots and has a steadier stroke than the one below.
 - **Cue shop**: 8 cues from a free House Cue to the 50,000-coin Black Diamond Royale. Every stat changes the physics (see below). You earn coins by potting balls and beating the CPU.
 - **AI coach**: press **H** and the AI suggests a shot for you (aim, power and spin), ready to fire with Space.
-- **Real physics**: fixed-step ball/ball and cushion collisions, rolling friction, follow/draw and side spin, and pocket jaws that can rattle a ball out.
+- **Real physics** (validated against textbook billiards results on every build):
+  - Every ball has a 3-D spin vector. It slides on the cloth (μ 0.2), then rolls (μ 0.01) at 5/7 of its speed after a centre-ball hit.
+  - Draw, follow and stun come from the spin itself.
+  - Ball-to-ball friction follows Alciatore's measured fit, which produces real cut- and spin-induced **throw**.
+  - Cushions grip a spinning ball, so english changes the rebound.
+  - Squirt from side spin, and pocket jaws that can rattle a ball out.
+- **Exact aim prediction**: the guide doesn't draw ghost-ball geometry. It plays the shot in the physics engine in the background and draws the real paths: the cue ball to contact, the object ball (throw included), the cue ball's path afterwards (draw and follow curves), where each ball stops, a green pocket when the ball drops, and a red **SCRATCH** warning. With stroke error off (the default), the ball goes exactly where the guide shows.
+- **Smart scoreboard (Tab)**: per-player frames or racks, score, current and best break or run, shots, pot success and fouls; live **win chances** for the rack/frame and the match (based on the score, what is left on the table, who is at the table and player skill); points left in snooker; and a match log. A slim win-chance bar sits under the match title.
 - **Aim guides**: off, ghost ball, or full prediction (object-ball path, cue-ball tangent, and a highlight on the target pocket).
 - **Smart aiming**:
   - **Aim assist** (menu: Off / Light / Strong): when the cursor rests, an aim within a few pixels of a potting line snaps onto it exactly. It never acts while you are moving, so the cue stays free.
@@ -93,6 +101,7 @@ Headless benchmark (`tests/NeonCue.Sim`, CPU vs CPU), share of non-break shots t
 | AI coach | H |
 | Cue shop (from the menu) | C |
 | Aim guide / fast forward / sound | G / F / M |
+| Scoreboard | Tab |
 | Pause menu | Esc |
 
 ## Build and run
@@ -104,6 +113,14 @@ dotnet run --project src/NeonCue -c Release
 ```
 
 Or download `NeonCue-win-x64.zip` from the [Releases](../../releases) page. It is self-contained, so it does not need .NET installed. Unzip it and run `NeonCue.exe`.
+
+### Physics validation
+
+```bash
+dotnet run --project tests/NeonCue.PhysicsCheck -c Release
+```
+
+Checks natural roll (5/7), sliding distance, stun, draw and follow, the 90° and 30° rules, throw, english off the cushion, energy conservation and determinism. CI fails if any check fails.
 
 ### Automated play-test
 
