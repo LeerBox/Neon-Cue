@@ -1,6 +1,6 @@
 # Neon Cue
 
-A billiards game for Windows, written in C# (.NET 8, WinForms + GDI+, no external packages). It has a photorealistic look, with the original neon style still available.
+A billiards game for Windows, written in C# (.NET 8, WinForms + GDI+, no external packages). It has a photorealistic table and a clean, broadcast-style interface (charcoal panels, gold and steel-blue accents); the original neon table is still available as a table style.
 It has six game modes, four AI levels and a deterministic physics engine. The AI plans its shots by
 playing them out in that same engine.
 
