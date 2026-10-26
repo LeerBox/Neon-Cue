@@ -8,11 +8,11 @@ static class CueArt
 {
     public static Color TierColor(CueTier tier) => tier switch
     {
-        CueTier.Rare => Theme.Cyan,
-        CueTier.Epic => Theme.Violet,
-        CueTier.Legendary => Theme.Amber,
-        CueTier.Mythic => Theme.Magenta,
-        _ => Theme.TextDim,
+        CueTier.Rare => Ui.Blue,
+        CueTier.Epic => Theme.Hex("#9C84D6"),
+        CueTier.Legendary => Ui.Gold,
+        CueTier.Mythic => Theme.Hex("#D98AB3"),
+        _ => Ui.Text2,
     };
 
     /// <param name="unit">Size of one "pixel" in the current coordinate system (glow widths scale with it).</param>

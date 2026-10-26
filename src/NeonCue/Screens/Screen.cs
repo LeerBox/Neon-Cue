@@ -35,27 +35,26 @@ sealed class UiButton
 
     public bool Contains(Point p) => Rect.Contains(p);
 
+    /// <summary>Primary: solid champagne gold with dark lettering. Secondary: hairline outline that warms to gold on hover.</summary>
     public void Draw(Graphics g, float u)
     {
-        using var path = Gfx.RoundRect(Rect, Rect.Height / 2);
+        float radius = 4 * u;
+        using var path = Gfx.RoundRect(Rect, radius);
         if (Primary)
         {
-            using var br = new LinearGradientBrush(Rect, Theme.A(Theme.Magenta, Hover ? 255 : 215), Theme.A(Theme.Violet, Hover ? 255 : 215), 0f);
+            using var br = new LinearGradientBrush(Rect, Hover ? Ui.GoldBright : Theme.Mix(Ui.GoldBright, Ui.Gold, 0.4), Hover ? Ui.Gold : Theme.Mix(Ui.Gold, Color.Black, 0.12), 90f);
             g.FillPath(br, path);
-            Gfx.GlowPath(g, path, Theme.Magenta, 1.5f * u, (Hover ? 4 : 3) * u, 4, Hover ? 48 : 30);
         }
         else
         {
-            using var br = new SolidBrush(Theme.A(Hover ? Theme.PanelLight : Theme.Panel, 235));
+            using var br = new SolidBrush(Color.FromArgb(Hover ? 220 : 150, Hover ? Ui.Panel2 : Ui.Panel));
             g.FillPath(br, path);
-            if (Hover) Gfx.GlowPath(g, path, Accent, 1.4f * u, 2.5f * u, 3, 40);
-            else
-            {
-                using var pen = new Pen(Theme.A(Accent, 120), 1.2f * u);
-                g.DrawPath(pen, path);
-            }
+            using var pen = new Pen(Hover ? Ui.Gold : Ui.LineStrong, 1f);
+            g.DrawPath(pen, path);
         }
-        Gfx.Text(g, Text, Theme.F((Primary ? 22 : 16) * u, FontStyle.Bold), Primary ? Color.White : Theme.Text, Rect, StringAlignment.Center);
+        var font = Ui.Head((Primary ? 19 : 14) * u);
+        Ui.Tracked(g, Text.ToUpperInvariant(), font, Primary ? Ui.Ink : Hover ? Color.White : Ui.Text,
+            Rect.X + Rect.Width / 2, Rect.Y + Rect.Height / 2, (Primary ? 3.2f : 2.2f) * u, StringAlignment.Center);
     }
 
     public static bool Hit(IEnumerable<UiButton> buttons, Point p)

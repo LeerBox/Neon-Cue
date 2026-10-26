@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force shots | Out-Null
-          foreach ($m in 'snooker','watchsnooker','game','menu') {
+          foreach ($m in 'snooker','watchsnooker','game','menu','shop') {
             Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--render',"shots/$m.png",$m -Wait
           }
           $env:NEONCUE_STATS = '1'

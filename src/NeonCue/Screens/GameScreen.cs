@@ -985,106 +985,95 @@ sealed class GameScreen : IScreen, IPhysicsListener
     readonly List<string> eventLog = new();
     bool showStats;
 
-    /// <summary>Thin live win-chance bar under the match title.</summary>
-    void DrawWinBar(Graphics g, float cx, float y)
-    {
-        if (state.PlayerCount < 2) return;
-        double p = WinOdds.Match(state, rules, 0);
-        float w = 230 * u, hh = 5 * u, x = cx - w / 2;
-        using (var bg = new SolidBrush(Theme.A(Theme.Magenta, 200))) g.FillRectangle(bg, x, y, w, hh);
-        using (var fg = new SolidBrush(Theme.A(Theme.Cyan, 230))) g.FillRectangle(fg, x, y, (float)(w * p), hh);
-        var f = Theme.F(11 * u, FontStyle.Bold);
-        Gfx.Text(g, $"{p * 100:0}%", f, Theme.Cyan, new RectangleF(x - 46 * u, y - 7 * u, 42 * u, 18 * u), StringAlignment.Far);
-        Gfx.Text(g, $"{(1 - p) * 100:0}%", f, Theme.Magenta, new RectangleF(x + w + 4 * u, y - 7 * u, 42 * u, 18 * u));
-    }
-
     /// <summary>Tab overlay: full match statistics, live odds and the story of the match so far.</summary>
     void DrawScoreboard(Graphics g)
     {
-        using (var dim = new SolidBrush(Color.FromArgb(150, 4, 3, 10))) g.FillRectangle(dim, new Rectangle(Point.Empty, size));
-        float cx = size.Width / 2f, pw = 760 * u, ph = 470 * u;
+        Ui.Scrim(g, size, 160);
+        float cx = size.Width / 2f, pw = 720 * u, ph = 470 * u;
         var r = new RectangleF(cx - pw / 2, size.Height / 2f - ph / 2, pw, ph);
-        using (var path = Gfx.RoundRect(r, 20 * u))
-        {
-            using var br = new SolidBrush(Theme.A(Theme.Panel, 246));
-            g.FillPath(br, path);
-            Gfx.GlowPath(g, path, Theme.Cyan, 1.4f * u, 3 * u, 4, 26);
-        }
-        Gfx.GlowText(g, "SCOREBOARD", Theme.F(28 * u, FontStyle.Bold), Theme.Cyan, Color.White, new PointF(cx, r.Y + 34 * u), spread: 3 * u, layers: 3);
-        Gfx.Text(g, $"{rules.Name.ToUpperInvariant()}  •  {(rules.Mode == GameMode.Snooker ? "FRAME" : "RACK")} {state.RackNumber}",
-            Theme.F(13 * u, FontStyle.Bold), Theme.TextDim, new RectangleF(r.X, r.Y + 54 * u, r.Width, 20 * u), StringAlignment.Center);
+        Ui.Shadow(g, r, 6 * u, 18 * u);
+        Ui.Card(g, r, 6 * u, 248);
+        using (var top = new SolidBrush(Ui.Gold)) g.FillRectangle(top, r.X, r.Y, r.Width, 3 * u);
+        Ui.Heading(g, "Match statistics", cx, r.Y + 40 * u, u, 22);
+        Ui.Tracked(g, $"{rules.Name.ToUpperInvariant()}   ·   {(rules.Mode == GameMode.Snooker ? "FRAME" : "RACK")} {state.RackNumber}",
+            Ui.Head(10.5f * u), Ui.Text3, cx, r.Y + 72 * u, 2 * u, StringAlignment.Center);
 
         bool snooker = rules.Mode == GameMode.Snooker, points = rules.IsPointsGame;
         var rows = new List<(string label, Func<int, string> value)>
         {
-            ("Cue", i => state.Players[i].Cue.Name),
-            (snooker ? "Frames" : "Racks won", i => state.Players[i].RacksWon.ToString()),
+            ("CUE", i => state.Players[i].Cue.Name),
+            (snooker ? "FRAMES" : "RACKS WON", i => state.Players[i].RacksWon.ToString()),
         };
-        if (points) rows.Add(("Score", i => state.Players[i].Score.ToString()));
+        if (points) rows.Add(("SCORE", i => state.Players[i].Score.ToString()));
         if (snooker)
         {
-            rows.Add(("Current break", i => state.Current == i ? state.CurrentBreak.ToString() : "–"));
-            rows.Add(("Highest break", i => state.Players[i].HighBreak.ToString()));
+            rows.Add(("CURRENT BREAK", i => state.Current == i ? state.CurrentBreak.ToString() : "–"));
+            rows.Add(("HIGHEST BREAK", i => state.Players[i].HighBreak.ToString()));
         }
         else
         {
-            rows.Add(("Current run", i => state.Current == i ? state.Run.ToString() : "–"));
-            rows.Add(("Best run", i => state.Players[i].BestRun.ToString()));
+            rows.Add(("CURRENT RUN", i => state.Current == i ? state.Run.ToString() : "–"));
+            rows.Add(("BEST RUN", i => state.Players[i].BestRun.ToString()));
         }
-        rows.Add(("Shots", i => state.Players[i].Shots.ToString()));
-        rows.Add(("Pot success", i => state.Players[i].Shots == 0 ? "–" : $"{100.0 * state.Players[i].Pots / state.Players[i].Shots:0}%"));
-        rows.Add(("Fouls", i => state.Players[i].Fouls.ToString()));
+        rows.Add(("SHOTS", i => state.Players[i].Shots.ToString()));
+        rows.Add(("POT SUCCESS", i => state.Players[i].Shots == 0 ? "–" : $"{100.0 * state.Players[i].Pots / state.Players[i].Shots:0}%"));
+        rows.Add(("FOULS", i => state.Players[i].Fouls.ToString()));
 
         int n = state.PlayerCount;
-        float labelX = r.X + 36 * u, colW = 190 * u, col0 = r.X + 250 * u, y = r.Y + 86 * u, rowH = 25 * u;
+        float labelX = r.X + 40 * u, colW = 170 * u, col0 = r.X + 290 * u, y = r.Y + 100 * u, rowH = 24 * u;
         for (int i = 0; i < n; i++)
-            Gfx.Text(g, state.Players[i].Name, Theme.F(17 * u, FontStyle.Bold), Theme.PlayerColor(i), new RectangleF(col0 + i * colW, y, colW, 24 * u), StringAlignment.Center);
-        y += 30 * u;
+        {
+            float c = col0 + i * colW + colW / 2;
+            Ui.Tracked(g, state.Players[i].Name.ToUpperInvariant(), Ui.Head(14 * u), Ui.Player(i), c, y + 10 * u, 1.6f * u, StringAlignment.Center);
+        }
+        y += 28 * u;
+        Ui.Hairline(g, labelX, y, r.Right - 40 * u, y);
+        y += 4 * u;
         foreach (var (label, value) in rows)
         {
-            Gfx.Text(g, label, Theme.F(14 * u), Theme.TextDim, new RectangleF(labelX, y, 200 * u, rowH));
+            Ui.Tracked(g, label, Ui.Head(10.5f * u), Ui.Text3, labelX, y + rowH / 2, 1.6f * u);
             for (int i = 0; i < n; i++)
-                Gfx.Text(g, value(i), Theme.F(15 * u, FontStyle.Bold), Theme.Text, new RectangleF(col0 + i * colW, y, colW, rowH), StringAlignment.Center);
+                Ui.Write(g, value(i), Ui.Num(15 * u), Ui.Text, new RectangleF(col0 + i * colW, y, colW, rowH), StringAlignment.Center);
             y += rowH;
         }
 
         if (n == 2)
         {
-            y += 8 * u;
+            y += 10 * u;
             void OddsRow(string label, double p0)
             {
-                Gfx.Text(g, label, Theme.F(14 * u, FontStyle.Bold), Theme.Text, new RectangleF(labelX, y, 200 * u, rowH));
-                float bx = col0 + 10 * u, bw = colW * 2 - 20 * u, by = y + 8 * u, bh = 10 * u;
-                using (var b1 = new SolidBrush(Theme.A(Theme.Magenta, 210))) g.FillRectangle(b1, bx, by, bw, bh);
-                using (var b0 = new SolidBrush(Theme.A(Theme.Cyan, 230))) g.FillRectangle(b0, bx, by, (float)(bw * p0), bh);
-                Gfx.Text(g, $"{p0 * 100:0}%", Theme.F(12 * u, FontStyle.Bold), Theme.Cyan, new RectangleF(bx - 48 * u, y, 44 * u, rowH), StringAlignment.Far);
-                Gfx.Text(g, $"{(1 - p0) * 100:0}%", Theme.F(12 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(bx + bw + 6 * u, y, 50 * u, rowH));
-                y += rowH + 4 * u;
+                Ui.Tracked(g, label, Ui.Head(10.5f * u), Ui.Text2, labelX, y + rowH / 2, 1.6f * u);
+                float bx = col0 + 10 * u, bw = colW * 2 - 20 * u, by = y + rowH / 2 - 2 * u;
+                using (var b1 = new SolidBrush(Color.FromArgb(200, Ui.Blue))) g.FillRectangle(b1, bx, by, bw, 4 * u);
+                using (var b0 = new SolidBrush(Ui.Gold)) g.FillRectangle(b0, bx, by, (float)(bw * p0), 4 * u);
+                Ui.Write(g, $"{p0 * 100:0}%", Ui.Num(13 * u), Ui.Gold, new RectangleF(bx - 52 * u, y, 46 * u, rowH), StringAlignment.Far);
+                Ui.Write(g, $"{(1 - p0) * 100:0}%", Ui.Num(13 * u), Ui.Blue, new RectangleF(bx + bw + 6 * u, y, 50 * u, rowH));
+                y += rowH + 2 * u;
             }
-            OddsRow(snooker ? "Win this frame" : "Win this rack", WinOdds.Rack(state, rules, 0));
-            if (rules.UsesRaceTo) OddsRow("Win the match", WinOdds.Match(state, rules, 0));
+            OddsRow(snooker ? "WIN THIS FRAME" : "WIN THIS RACK", WinOdds.Rack(state, rules, 0));
+            if (rules.UsesRaceTo) OddsRow("WIN THE MATCH", WinOdds.Match(state, rules, 0));
             if (snooker)
             {
-                string note = $"{SnookerRules.PointsRemaining(state)} points left on the table";
-                for (int i = 0; i < 2; i++) if (SnookerRules.NeedsSnookers(state, i)) note += $"  •  {state.Players[i].Name} needs snookers";
-                Gfx.Text(g, note, Theme.F(13 * u), Theme.Amber, new RectangleF(labelX, y, r.Width - 72 * u, rowH));
+                string note = $"{SnookerRules.PointsRemaining(state)} points remaining";
+                for (int i = 0; i < 2; i++) if (SnookerRules.NeedsSnookers(state, i)) note += $"   ·   {state.Players[i].Name} needs snookers";
+                Ui.Write(g, note, Ui.Body(12.5f * u), Ui.Warn, new RectangleF(labelX, y, r.Width - 80 * u, rowH));
                 y += rowH;
             }
         }
 
-        // The story so far.
-        float lx = r.X + 36 * u;
         y += 6 * u;
-        Gfx.Text(g, "MATCH LOG", Theme.F(12 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(lx, y, 200 * u, 18 * u));
-        y += 20 * u;
-        var recent = eventLog.Skip(Math.Max(0, eventLog.Count - 4)).Reverse().ToList();
-        if (recent.Count == 0) Gfx.Text(g, "Nothing notable yet", Theme.F(13 * u), Theme.TextDim, new RectangleF(lx, y, r.Width - 72 * u, 18 * u));
+        Ui.Hairline(g, labelX, y, r.Right - 40 * u, y);
+        y += 14 * u;
+        Ui.Tracked(g, "MATCH LOG", Ui.Head(10 * u), Ui.Gold, labelX, y, 2 * u);
+        y += 14 * u;
+        var recent = eventLog.Skip(Math.Max(0, eventLog.Count - 3)).Reverse().ToList();
+        if (recent.Count == 0) Ui.Write(g, "Nothing notable yet", Ui.Body(12.5f * u), Ui.Text3, new RectangleF(labelX, y, r.Width - 80 * u, 18 * u));
         foreach (var e in recent)
         {
-            Gfx.Text(g, e, Theme.F(13 * u), Theme.TextDim, new RectangleF(lx, y, r.Width - 72 * u, 18 * u));
+            Ui.Write(g, e, Ui.Body(12.5f * u), Ui.Text2, new RectangleF(labelX, y, r.Width - 80 * u, 18 * u));
             y += 18 * u;
         }
-        Gfx.Text(g, "Tab to close", Theme.F(12 * u), Theme.A(Theme.TextDim, 150), new RectangleF(r.X, r.Bottom - 26 * u, r.Width, 18 * u), StringAlignment.Center);
+        Ui.Tracked(g, "TAB TO CLOSE", Ui.Head(9.5f * u), Ui.Text3, cx, r.Bottom - 18 * u, 1.8f * u, StringAlignment.Center);
     }
 
     /// <summary>Keeps the notable moments (fouls, big runs, rack results) for the scoreboard.</summary>
@@ -1158,7 +1147,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
         if (phase == Phase.Placing && state.KitchenOnly && HumanTurn)
         {
-            using var kb = new SolidBrush(Color.FromArgb(22, 0, 240, 255));
+            using var kb = new SolidBrush(Look.Realistic ? Color.FromArgb(20, 255, 255, 255) : Color.FromArgb(22, 0, 240, 255));
             if (Table.HasD)
             {
                 float dr = (float)Table.DRadius;
@@ -1230,7 +1219,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             float rr = (float)(R + 4 + Math.Sin(clock * 6) * 1.5);
             using var ring = new GraphicsPath();
             ring.AddEllipse((float)state.Cue.Pos.X - rr, (float)state.Cue.Pos.Y - rr, rr * 2, rr * 2);
-            Gfx.GlowPath(g, ring, ok ? Theme.Lime : Theme.Red, 1.2f, 1.6f, 3, 50);
+            Gfx.GlowPath(g, ring, ok ? Ui.Good : Ui.Bad, 1.2f, 1.6f, 1, 30);
         }
 
         if (humanAim || phase == Phase.AIAiming)
@@ -1412,100 +1401,123 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     // ------------------------------------------------------------------ HUD
 
+    /// <summary>
+    /// Broadcast-style score strip, top centre: [name | racks | score] [event] [score | racks | name],
+    /// a thin accent rule under whoever is at the table, live win odds beneath.
+    /// </summary>
     void DrawHud(Graphics g)
     {
-        float w = size.Width;
-        float cardW = Math.Min(400 * u, w * 0.31f), cardH = 72 * u, y = 14 * u;
+        float w = size.Width, cx = w / 2, top = 14 * u, h = 50 * u;
         int n = state.PlayerCount;
-        for (int i = 0; i < n; i++)
-        {
-            var rect = i == 0 ? new RectangleF(18 * u, y, cardW, cardH) : new RectangleF(w - 18 * u - cardW, y, cardW, cardH);
-            DrawPlayerCard(g, i, rect);
-        }
+        bool points = rules.IsPointsGame || rules.Mode == GameMode.Snooker;
+        bool racks = rules.UsesRaceTo && n > 1;
+        float nameW = 230 * u, boxW = 52 * u, midW = 190 * u;
+        int boxes = (racks ? 1 : 0) + (points ? 1 : 0);
+        float sideW = nameW + boxes * boxW;
+        float total = n > 1 ? sideW * 2 + midW : nameW + midW;
+        float x0 = cx - total / 2;
+        var bar = new RectangleF(x0, top, total, h);
 
-        // Centre block.
-        float cx = w / 2;
-        Gfx.GlowText(g, rules.Name.ToUpperInvariant(), Theme.F(26 * u, FontStyle.Bold), Theme.Magenta, Color.White, new PointF(cx, y + 18 * u), spread: 3 * u, layers: 3);
+        Ui.Shadow(g, bar, 4 * u, 10 * u);
+        Ui.Card(g, bar, 4 * u, 240);
+
+        // Centre: event and format.
+        var mid = n > 1 ? new RectangleF(x0 + sideW, top, midW, h) : new RectangleF(x0 + nameW, top, midW, h);
+        using (var mb = new SolidBrush(Color.FromArgb(120, 0, 0, 0))) g.FillRectangle(mb, mid);
+        Ui.Hairline(g, mid.X, top + 6 * u, mid.X, top + h - 6 * u);
+        Ui.Hairline(g, mid.Right, top + 6 * u, mid.Right, top + h - 6 * u);
+        Ui.Tracked(g, rules.Name.ToUpperInvariant(), Ui.Head(17 * u), Ui.Text, mid.X + mid.Width / 2, top + 19 * u, 2.4f * u, StringAlignment.Center);
         string sub = rules.IsSolo ? $"RACK {state.RackNumber}"
-            : rules.Mode == GameMode.Snooker ? (state.RaceTo == 1 ? "SINGLE FRAME" : $"BEST OF {2 * state.RaceTo - 1} FRAMES")
+            : rules.Mode == GameMode.Snooker ? (state.RaceTo == 1 ? "SINGLE FRAME" : $"BEST OF {2 * state.RaceTo - 1}")
             : rules.UsesRaceTo ? (state.RaceTo == 1 ? "SINGLE RACK" : $"RACE TO {state.RaceTo}")
             : $"FIRST TO {state.TargetScore}";
-        Gfx.Text(g, sub, Theme.F(13 * u, FontStyle.Bold), Theme.TextDim, new RectangleF(cx - 150 * u, y + 34 * u, 300 * u, 20 * u), StringAlignment.Center);
+        Ui.Tracked(g, sub, Ui.Head(10.5f * u), Ui.Gold, mid.X + mid.Width / 2, top + 36 * u, 2f * u, StringAlignment.Center);
 
-        DrawWinBar(g, cx, y + 80 * u);
+        for (int i = 0; i < n; i++)
+        {
+            bool left = i == 0;
+            float sx = left ? x0 : mid.Right;
+            DrawPlayerSide(g, i, new RectangleF(sx, top, n > 1 ? sideW : nameW, h), left, nameW, boxW, racks, points);
+        }
+
+        // Under the strip: ball on / hint, then live odds.
+        float y2 = top + h + 14 * u;
         int target = rules.TargetBall(state);
+        string hint = state.RackOver ? "" : rules.Hint(state);
         if (target > 0)
         {
-            Gfx.Text(g, "NEXT", Theme.F(12 * u, FontStyle.Bold), Theme.Cyan, new RectangleF(cx - 60 * u, y + 52 * u, 50 * u, 22 * u), StringAlignment.Far);
-            float r = 10 * u;
-            DrawMiniBall(g, target, new PointF(cx + 4 * u, y + 63 * u), r);
+            Ui.Tracked(g, "BALL ON", Ui.Head(10 * u), Ui.Text3, cx - 8 * u, y2, 1.8f * u, StringAlignment.Far);
+            DrawMiniBall(g, target, new PointF(cx + 6 * u, y2), 7.5f * u);
         }
-        else if (!string.IsNullOrEmpty(rules.Hint(state)) && !state.RackOver)
+        else if (!string.IsNullOrEmpty(hint))
         {
-            Gfx.Text(g, rules.Hint(state), Theme.F(13 * u), Theme.Cyan, new RectangleF(cx - 170 * u, y + 52 * u, 340 * u, 22 * u), StringAlignment.Center);
+            Ui.Tracked(g, hint.ToUpperInvariant(), Ui.Head(10.5f * u), Ui.Text2, cx, y2, 1.6f * u, StringAlignment.Center);
         }
+        if (n > 1) DrawWinBar(g, bar.X, bar.Right, top + h + 1 * u);
     }
 
-    readonly Dictionary<(int w, int h, int color, bool active), Bitmap> cardCache = new();
-
-    /// <summary>Card background and (glowing) border, rendered once per size/state and blitted.</summary>
-    void DrawCardChrome(Graphics g, RectangleF rect, Color accent, bool active)
-    {
-        int pad = (int)Math.Ceiling(16 * u);
-        var key = (w: (int)rect.Width, h: (int)rect.Height, color: accent.ToArgb(), active);
-        if (!cardCache.TryGetValue(key, out var bmp))
-        {
-            if (cardCache.Count > 16) { foreach (var b in cardCache.Values) b.Dispose(); cardCache.Clear(); }
-            bmp = new Bitmap(key.w + pad * 2, key.h + pad * 2, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-            using (var cg = Graphics.FromImage(bmp))
-            {
-                Theme.Setup(cg);
-                var r = new RectangleF(pad, pad, key.w, key.h);
-                using var path = Gfx.RoundRect(r, 14 * u);
-                using (var br = new SolidBrush(Theme.A(Theme.Panel, 235))) cg.FillPath(br, path);
-                if (active) Gfx.GlowPath(cg, path, accent, 1.8f * u, 3 * u, 4, 40);
-                else using (var pen = new Pen(Theme.A(accent, 60), 1.2f * u)) cg.DrawPath(pen, path);
-            }
-            cardCache[key] = bmp;
-        }
-        g.DrawImageUnscaled(bmp, (int)rect.X - pad, (int)rect.Y - pad);
-    }
-
-    void DrawPlayerCard(Graphics g, int i, RectangleF rect)
+    void DrawPlayerSide(Graphics g, int i, RectangleF r, bool left, float nameW, float boxW, bool racks, bool points)
     {
         var p = state.Players[i];
         bool active = state.Current == i && !state.RackOver;
-        Color accent = Theme.PlayerColor(i);
-        DrawCardChrome(g, rect, accent, active);
+        Color accent = Ui.Player(i);
+        float h = r.Height;
 
-        float px = rect.X + 18 * u;
-        string tag = (p.IsAI ? $"CPU • {p.Level.ToString().ToUpperInvariant()}" : "HUMAN") + $" • {p.Cue.Name.ToUpperInvariant()}";
-        Gfx.Text(g, p.Name, Theme.F(22 * u, FontStyle.Bold), active ? Color.White : Theme.Text, new RectangleF(px, rect.Y + 8 * u, rect.Width * 0.55f, 30 * u));
-        var nameSize = g.MeasureString(p.Name, Theme.F(22 * u, FontStyle.Bold));
-        Gfx.Text(g, tag, Theme.F(11 * u, FontStyle.Bold), Theme.A(CueArt.TierColor(p.Cue.Tier) == Theme.TextDim ? accent : CueArt.TierColor(p.Cue.Tier), 220),
-            new RectangleF(px + nameSize.Width + 4 * u, rect.Y + 14 * u, rect.Right - 70 * u - (px + nameSize.Width + 4 * u), 20 * u));
-
-        string status = rules.Status(state, i);
-        if (active && phase == Phase.AIThinking)
-            status = "Thinking" + new string('.', 1 + (int)(clock * 3) % 3);
-        Gfx.Text(g, status, Theme.F(14 * u), active ? accent : Theme.TextDim, new RectangleF(px, rect.Y + 40 * u, rect.Width * 0.6f, 24 * u));
-
-        // Racks won.
-        float right = rect.Right - 16 * u;
-        if (rules.UsesRaceTo && state.PlayerCount > 1)
+        // Name block.
+        var name = left ? new RectangleF(r.X, r.Y, nameW, h) : new RectangleF(r.Right - nameW, r.Y, nameW, h);
+        float pad = 16 * u;
+        var align = left ? StringAlignment.Near : StringAlignment.Far;
+        float tx = left ? name.X + pad : name.Right - pad;
+        if (active)
         {
-            Gfx.Text(g, p.RacksWon.ToString(), Theme.F(36 * u, FontStyle.Bold), accent, new RectangleF(right - 50 * u, rect.Y, 50 * u, rect.Height), StringAlignment.Far);
-            right -= 56 * u;
+            using var ab = new SolidBrush(Color.FromArgb(28, accent));
+            g.FillRectangle(ab, name);
+            using var rule = new SolidBrush(accent);
+            g.FillRectangle(rule, name.X, name.Bottom - 3 * u, name.Width, 3 * u);
         }
+        Ui.Tracked(g, p.Name.ToUpperInvariant(), Ui.Head(16 * u), active ? Color.White : Ui.Text, tx, r.Y + 18 * u, 1.4f * u, align);
+        string status = active && phase == Phase.AIThinking ? "Thinking" + new string('.', 1 + (int)(clock * 3) % 3) : rules.Status(state, i);
+        string tag = p.IsAI ? $"CPU {p.Level.ToString().ToUpperInvariant()}" : "";
+        string line = string.IsNullOrEmpty(tag) ? status : string.IsNullOrEmpty(status) ? tag : $"{tag}  ·  {status}";
+        Ui.Write(g, line, Ui.Body(11.5f * u), active ? Ui.Text2 : Ui.Text3, new RectangleF(name.X + pad, r.Y + 28 * u, nameW - pad * 2, 16 * u), align);
 
+        // Racks / frames and score boxes, nearest the centre.
+        float bx = left ? name.Right : name.X;
+        void Box(string value, bool emphasis)
+        {
+            var b = left ? new RectangleF(bx, r.Y, boxW, h) : new RectangleF(bx - boxW, r.Y, boxW, h);
+            if (emphasis)
+            {
+                using var eb = new SolidBrush(Color.FromArgb(active ? 48 : 22, accent));
+                g.FillRectangle(eb, b);
+            }
+            Ui.Hairline(g, left ? b.X : b.Right, r.Y + 8 * u, left ? b.X : b.Right, r.Bottom - 8 * u);
+            Ui.Write(g, value, Ui.Num((emphasis ? 26 : 20) * u), emphasis ? Color.White : Ui.Text2, b, StringAlignment.Center);
+            bx += left ? boxW : -boxW;
+        }
+        if (racks) Box(p.RacksWon.ToString(), !points);
+        if (points) Box(p.Score.ToString(), true);
+
+        // 8-ball group under the name.
         var balls = rules.PlayerBalls(state, i);
-        float r = 8.5f * u;
-        float bx = right - r;
-        for (int k = balls.Count - 1; k >= 0 && bx > rect.X + rect.Width * 0.55f; k--)
-        {
-            DrawMiniBall(g, balls[k], new PointF(bx, rect.Y + rect.Height - 20 * u), r);
-            bx -= r * 2.3f;
-        }
+        float br = 6.5f * u, step = br * 2.4f;
+        float y = r.Bottom + 15 * u;
+        float startX = left ? name.X + pad + br : name.Right - pad - br;
+        for (int k = 0; k < balls.Count; k++)
+            DrawMiniBall(g, balls[k], new PointF(startX + (left ? k : -k) * step, y), br);
+    }
+
+    /// <summary>Hairline-thin live win-chance bar spanning the score strip.</summary>
+    void DrawWinBar(Graphics g, float x1, float x2, float y)
+    {
+        if (state.PlayerCount < 2) return;
+        double p = WinOdds.Match(state, rules, 0);
+        float w = x2 - x1, hh = 3 * u;
+        using (var b1 = new SolidBrush(Color.FromArgb(200, Ui.Blue))) g.FillRectangle(b1, x1, y, w, hh);
+        using (var b0 = new SolidBrush(Ui.Gold)) g.FillRectangle(b0, x1, y, (float)(w * p), hh);
+        var f = Ui.Num(11 * u);
+        Ui.Write(g, $"{p * 100:0}%", f, Ui.Gold, new RectangleF(x1 - 46 * u, y - 7 * u, 40 * u, 16 * u), StringAlignment.Far);
+        Ui.Write(g, $"{(1 - p) * 100:0}%", f, Ui.Blue, new RectangleF(x2 + 6 * u, y - 7 * u, 40 * u, 16 * u));
     }
 
     void DrawMiniBall(Graphics g, int number, PointF center, float r)
@@ -1519,155 +1531,140 @@ sealed class GameScreen : IScreen, IPhysicsListener
         string hint = phase switch
         {
             Phase.Placing when HumanTurn => state.KitchenOnly
-                ? Table.HasD ? "BALL IN HAND — place the cue ball in the D, then click" : "BALL IN HAND — place the cue ball behind the head string, then click"
-                : "BALL IN HAND — move the cue ball anywhere, then click to place",
+                ? Table.HasD ? "Ball in hand — place the cue ball in the D, then click" : "Ball in hand — place the cue ball behind the head string, then click"
+                : "Ball in hand — move the cue ball anywhere, then click to place",
             Phase.Aiming when HumanTurn => state.BallInHand
-                ? "Drag back & release to shoot  •  click the cue ball to move it  •  Ctrl: precise aim  •  H: coach"
-                : "Aim with the mouse  •  drag back & release  •  Ctrl: precise aim  •  wheel / ←→ fine aim  •  H: coach",
-            Phase.AIThinking or Phase.AIAiming or Phase.AIPlacing => $"{state.CurrentPlayer.Name} is planning the shot…  (F: fast forward)",
-            Phase.Rolling => fastForward ? "Fast forward ON" : "",
+                ? "Drag back and release to shoot   ·   click the cue ball to move it   ·   Ctrl precise aim   ·   H coach"
+                : "Aim with the mouse   ·   drag back and release   ·   Ctrl precise aim   ·   Wheel / ← → fine aim   ·   H coach",
+            Phase.AIThinking or Phase.AIAiming or Phase.AIPlacing => $"{state.CurrentPlayer.Name} is at the table   ·   F fast forward",
+            Phase.Rolling => fastForward ? "Fast forward" : "",
             _ => "",
         };
-        Gfx.Text(g, hint, Theme.F(15 * u), Theme.TextDim, new RectangleF(24 * u, h - 62 * u, w - 470 * u, 40 * u));
-        Gfx.Text(g, "Tab: scoreboard   Esc: menu   G: guide   M: sound", Theme.F(12 * u), Theme.A(Theme.TextDim, 140), new RectangleF(24 * u, h - 30 * u, 500 * u, 20 * u));
+        Ui.Write(g, hint, Ui.Body(13.5f * u), Ui.Text2, new RectangleF(28 * u, h - 58 * u, w - 520 * u, 24 * u));
+        Ui.Tracked(g, "TAB SCOREBOARD     ESC MENU     G GUIDE     M SOUND", Ui.Head(9.5f * u), Ui.Text3, 28 * u, h - 26 * u, 1.6f * u);
 
-        // Power meter.
-        spinRadius = 30 * u;
-        spinCenter = new PointF(w - 30 * u - spinRadius, h - 44 * u);
-        powerRect = new RectangleF(spinCenter.X - spinRadius - 300 * u, h - 52 * u, 270 * u, 16 * u);
+        // Power: a thin track with tenth ticks; gold fill; green marks where the shot pots.
+        spinRadius = 24 * u;
+        spinCenter = new PointF(w - 34 * u - spinRadius, h - 44 * u);
+        powerRect = new RectangleF(spinCenter.X - spinRadius - 330 * u, h - 40 * u, 290 * u, 6 * u);
         double power = dragging || phase == Phase.AIAiming ? dragPower : kbPower;
-        using (var bgPath = Gfx.RoundRect(powerRect, 8 * u))
-        {
-            using var bb = new SolidBrush(Theme.A(Theme.Panel, 240));
-            g.FillPath(bb, bgPath);
-            using var bp = new Pen(Theme.A(Theme.Violet, 110), 1f * u);
-            g.DrawPath(bp, bgPath);
-        }
+        using (var track = new SolidBrush(Color.FromArgb(46, 255, 255, 255))) g.FillRectangle(track, powerRect);
         if (power > 0.003)
         {
-            var fill = new RectangleF(powerRect.X, powerRect.Y, Math.Max(powerRect.Height, (float)(powerRect.Width * power)), powerRect.Height);
-            using var fp = Gfx.RoundRect(fill, 8 * u);
-            using var lg = new LinearGradientBrush(powerRect, Theme.Lime, Theme.Red, 0f)
-            {
-                InterpolationColors = new ColorBlend { Colors = [Theme.Lime, Theme.Cyan, Theme.Magenta, Theme.Red], Positions = [0f, 0.35f, 0.75f, 1f] },
-            };
-            g.FillPath(lg, fp);
-            Gfx.GlowPath(g, fp, Theme.A(Theme.Mix(Theme.Cyan, Theme.Red, power), 200), 0.8f * u, 2 * u, 3, 30);
+            using var fill = new LinearGradientBrush(powerRect, Ui.Gold, Ui.GoldBright, 0f);
+            g.FillRectangle(fill, powerRect.X, powerRect.Y, (float)(powerRect.Width * power), powerRect.Height);
         }
-        string label = dragging || phase == Phase.AIAiming ? "POWER" : "POWER  (↑↓ / Space)";
-        Gfx.Text(g, $"{label}  {power * 100:0}%", Theme.F(12 * u, FontStyle.Bold), Theme.Text, new RectangleF(powerRect.X, powerRect.Y - 22 * u, powerRect.Width, 20 * u));
+        for (int k = 1; k < 10; k++)
+            Ui.Hairline(g, powerRect.X + powerRect.Width * k / 10f, powerRect.Y - 2 * u, powerRect.X + powerRect.Width * k / 10f, powerRect.Bottom, Color.FromArgb(70, 0, 0, 0));
+        Ui.Tracked(g, "POWER", Ui.Head(10 * u), Ui.Text3, powerRect.X, powerRect.Y - 14 * u, 2 * u);
+        Ui.Write(g, $"{power * 100:0}%", Ui.Num(15 * u), Ui.Text, new RectangleF(powerRect.X + 60 * u, powerRect.Y - 24 * u, 60 * u, 20 * u));
 
         var pv = HumanTurn && phase == Phase.Aiming ? preview : null;
         if (pv != null && pv.Target > 0)
         {
-            // Ticks under the bar for every power step that pots the aimed ball.
             float step = powerRect.Width / PreviewSteps;
-            using (var tick = new SolidBrush(Theme.A(Theme.Lime, 230)))
+            using (var tick = new SolidBrush(Ui.Good))
                 for (int i = 1; i <= PreviewSteps; i++)
-                    if (pv.Pots[i]) g.FillRectangle(tick, powerRect.X + (i - 0.5f) * step - step / 2 + 1, powerRect.Bottom + 3 * u, step - 2, 4 * u);
+                    if (pv.Pots[i]) g.FillRectangle(tick, powerRect.X + (i - 1) * step + 1, powerRect.Bottom + 4 * u, step - 2, 3 * u);
             string msg;
             Color mc;
-            if (pv.Pots[PowerStep(power)]) { msg = "POTS ✓"; mc = Theme.Lime; }
+            if (pv.Pots[PowerStep(power)]) { msg = "POTS"; mc = Ui.Good; }
             else if (pv.Any)
             {
                 int lo = Array.FindIndex(pv.Pots, x => x), hi = Array.FindLastIndex(pv.Pots, x => x);
-                msg = $"POT NEEDS {lo * 100 / PreviewSteps}–{hi * 100 / PreviewSteps}%";
-                mc = Theme.Amber;
+                msg = $"POTS AT {lo * 100 / PreviewSteps}–{hi * 100 / PreviewSteps}%";
+                mc = Ui.Warn;
             }
-            else { msg = "NO POT ON THIS LINE"; mc = Theme.TextDim; }
-            Gfx.Text(g, msg, Theme.F(12 * u, FontStyle.Bold), mc, new RectangleF(powerRect.X, powerRect.Y - 22 * u, powerRect.Width, 20 * u), StringAlignment.Far);
+            else { msg = "NO POT ON THIS LINE"; mc = Ui.Text3; }
+            Ui.Tracked(g, msg, Ui.Head(10 * u), mc, powerRect.Right, powerRect.Y - 14 * u, 1.8f * u, StringAlignment.Far);
         }
 
-        // Spin widget.
+        // Spin: a clean cue ball with a hairline cross and the tip contact point.
         var sr = new RectangleF(spinCenter.X - spinRadius, spinCenter.Y - spinRadius, spinRadius * 2, spinRadius * 2);
         using (var sp = new GraphicsPath())
         {
             sp.AddEllipse(sr);
             using var wb = new PathGradientBrush(sp)
             {
-                CenterPoint = new PointF(spinCenter.X - spinRadius * 0.3f, spinCenter.Y - spinRadius * 0.35f),
-                CenterColor = Color.White,
-                SurroundColors = [Theme.Hex("#9A98B0")],
+                CenterPoint = new PointF(spinCenter.X - spinRadius * 0.35f, spinCenter.Y - spinRadius * 0.4f),
+                CenterColor = Color.FromArgb(255, 250, 249, 245),
+                SurroundColors = [Color.FromArgb(255, 150, 152, 158)],
             };
             g.FillPath(wb, sp);
-            Gfx.GlowPath(g, sp, Theme.Cyan, 1.2f * u, 2 * u, 3, 34);
+            using var ring = new Pen(Ui.LineStrong, 1f);
+            g.DrawPath(ring, sp);
         }
-        using (var cross = new Pen(Color.FromArgb(70, 20, 20, 40), 1f))
+        using (var cross = new Pen(Color.FromArgb(60, 0, 0, 0), 1f))
         {
-            g.DrawLine(cross, sr.Left + 4 * u, spinCenter.Y, sr.Right - 4 * u, spinCenter.Y);
-            g.DrawLine(cross, spinCenter.X, sr.Top + 4 * u, spinCenter.X, sr.Bottom - 4 * u);
+            g.DrawLine(cross, sr.Left + 3 * u, spinCenter.Y, sr.Right - 3 * u, spinCenter.Y);
+            g.DrawLine(cross, spinCenter.X, sr.Top + 3 * u, spinCenter.X, sr.Bottom - 3 * u);
         }
         var dot = new PointF(spinCenter.X + (float)(spinSide * spinRadius), spinCenter.Y - (float)(spinTop * spinRadius));
-        using (var db = new SolidBrush(Theme.Red)) g.FillEllipse(db, dot.X - 5 * u, dot.Y - 5 * u, 10 * u, 10 * u);
-        using (var dp = new Pen(Color.White, 1.2f * u)) g.DrawEllipse(dp, dot.X - 5 * u, dot.Y - 5 * u, 10 * u, 10 * u);
-        Gfx.Text(g, "SPIN", Theme.F(11 * u, FontStyle.Bold), Theme.TextDim, new RectangleF(sr.X - 60 * u, sr.Bottom - 16 * u, 56 * u, 16 * u), StringAlignment.Far);
+        using (var db = new SolidBrush(Ui.Bad)) g.FillEllipse(db, dot.X - 4 * u, dot.Y - 4 * u, 8 * u, 8 * u);
+        Ui.Tracked(g, "SPIN", Ui.Head(10 * u), Ui.Text3, sr.X - 10 * u, spinCenter.Y, 2 * u, StringAlignment.Far);
     }
 
+    /// <summary>Lower-third style messages: dark plate, coloured edge, clean type.</summary>
     void DrawToasts(Graphics g)
     {
-        var tableTop = view.ToScreen(new Vec2(Table.Width / 2, 60));
-        float y = tableTop.Y;
+        var anchor = view.ToScreen(new Vec2(Table.Width / 2, 40));
+        float y = anchor.Y;
+        var font = Ui.BodyStrong(16 * u);
         foreach (var t in toasts)
         {
-            double fadeIn = Math.Min(1, t.Age / 0.15), fadeOut = Math.Min(1, (t.Life - t.Age) / 0.4);
+            double fadeIn = Math.Min(1, t.Age / 0.18), fadeOut = Math.Min(1, (t.Life - t.Age) / 0.4);
             double a = Math.Clamp(Math.Min(fadeIn, fadeOut), 0, 1);
-            float rise = (float)((1 - fadeIn) * 10 * u);
-            var font = Theme.F(25 * u, FontStyle.Bold);
+            float slide = (float)((1 - fadeIn) * 8 * u);
             var sz = g.MeasureString(t.Text, font);
-            var box = new RectangleF(tableTop.X - sz.Width / 2 - 20 * u, y - 22 * u + rise, sz.Width + 40 * u, 44 * u);
-            using (var path = Gfx.RoundRect(box, 22 * u))
-            using (var br = new SolidBrush(Color.FromArgb((int)(170 * a), 7, 6, 15)))
-                g.FillPath(br, path);
-            Gfx.GlowText(g, t.Text, font, Theme.A(t.Color, (int)(255 * a)), Theme.A(Theme.Mix(t.Color, Color.White, 0.55), (int)(255 * a)),
-                new PointF(tableTop.X, y + rise), spread: 3 * u, layers: 3, alpha: (int)(36 * a));
-            y += 50 * u;
+            var box = new RectangleF(anchor.X - sz.Width / 2 - 22 * u, y + slide, sz.Width + 44 * u, 34 * u);
+            Color accent = Ui.Accent(t.Color);
+            using (var br = new SolidBrush(Color.FromArgb((int)(225 * a), Ui.Panel))) g.FillRectangle(br, box);
+            using (var edge = new SolidBrush(Color.FromArgb((int)(255 * a), accent))) g.FillRectangle(edge, box.X, box.Y, 3 * u, box.Height);
+            using (var line = new Pen(Color.FromArgb((int)(40 * a), 255, 255, 255), 1f)) g.DrawRectangle(line, box.X, box.Y, box.Width, box.Height);
+            Ui.Write(g, t.Text, font, Color.FromArgb((int)(255 * a), Ui.Text), new RectangleF(box.X + 6 * u, box.Y, box.Width - 6 * u, box.Height), StringAlignment.Center);
+            y += 40 * u;
         }
     }
 
     void DrawOverlayPanel(Graphics g, string title, string subtitle, Color accent)
     {
-        using (var dim = new SolidBrush(Color.FromArgb(175, 4, 3, 10))) g.FillRectangle(dim, new Rectangle(Point.Empty, size));
+        Ui.Scrim(g, size, 175);
         float cx = size.Width / 2f, cy = size.Height / 2f;
-        float bh = buttons.Sum(b => (b.Primary ? 70 : 58) * u);
-        float ph = 150 * u + bh + 20 * u;
-        var r = new RectangleF(cx - 300 * u, cy - ph / 2, 600 * u, ph);
-        using var path = Gfx.RoundRect(r, 22 * u);
-        using (var br = new SolidBrush(Theme.A(Theme.Panel, 245))) g.FillPath(br, path);
-        Gfx.GlowPath(g, path, accent, 1.6f * u, 3 * u, 5, 30);
-        Gfx.GlowText(g, title, Theme.F(36 * u, FontStyle.Bold), accent, Color.White, new PointF(cx, r.Y + 62 * u), spread: 4 * u);
-        Gfx.Text(g, subtitle, Theme.F(16 * u), Theme.TextDim, new RectangleF(r.X, r.Y + 98 * u, r.Width, 26 * u), StringAlignment.Center);
+        float bh = buttons.Sum(b => (b.Primary ? 64 : 54) * u);
+        float ph = 140 * u + bh + 18 * u;
+        var r = new RectangleF(cx - 280 * u, cy - ph / 2, 560 * u, ph);
+        Ui.Shadow(g, r, 6 * u, 18 * u);
+        Ui.Card(g, r, 6 * u, 248);
+        using (var top = new SolidBrush(accent)) g.FillRectangle(top, r.X, r.Y, r.Width, 3 * u);
+        Ui.Heading(g, title, cx, r.Y + 50 * u, u, 26);
+        Ui.Write(g, subtitle, Ui.Body(14 * u), Ui.Text2, new RectangleF(r.X + 20 * u, r.Y + 84 * u, r.Width - 40 * u, 24 * u), StringAlignment.Center);
 
-        float by = r.Y + 150 * u;
+        float by = r.Y + 134 * u;
         foreach (var b in buttons)
         {
-            b.Rect = new RectangleF(cx - 150 * u, by, 300 * u, (b.Primary ? 56 : 46) * u);
+            b.Rect = new RectangleF(cx - 150 * u, by, 300 * u, (b.Primary ? 50 : 42) * u);
             b.Draw(g, u);
-            by += (b.Primary ? 70 : 58) * u;
+            by += (b.Primary ? 64 : 54) * u;
         }
     }
 
     void DrawPause(Graphics g) =>
-        DrawOverlayPanel(g, "PAUSED", $"{rules.Name} • {string.Join(" vs ", state.Players.Select(p => p.Name))}", Theme.Cyan);
+        DrawOverlayPanel(g, "Paused", $"{rules.Name}  ·  {string.Join("  vs  ", state.Players.Select(p => p.Name))}", Ui.Gold);
 
     void DrawRackOver(Graphics g)
     {
         if (overlayTimer < 0.9) return; // let the last ball drop first
         var winner = state.RackWinner >= 0 ? state.Players[state.RackWinner] : null;
-        string title = winner == null ? "RACK OVER"
-            : state.MatchOver ? $"{winner.Name.ToUpperInvariant()} WINS!"
-            : $"{winner.Name.ToUpperInvariant()} TAKES THE RACK";
+        string unit = rules.Mode == GameMode.Snooker ? "frame" : "rack";
+        string title = winner == null ? $"{unit} over"
+            : state.MatchOver ? $"{winner.Name} wins the match"
+            : $"{winner.Name} takes the {unit}";
         string subtitle = rules.UsesRaceTo
-            ? string.Join("   •   ", state.Players.Select(p => $"{p.Name} {p.RacksWon}"))
-            : string.Join("   •   ", state.Players.Select(p => $"{p.Name} {p.Score} pts"));
-        if (state.Players.All(p => p.IsAI) && !state.MatchOver) subtitle += "   —   next rack starting…";
-        Color accent = state.RackWinner >= 0 ? Theme.PlayerColor(state.RackWinner) : Theme.Cyan;
+            ? string.Join("     ", state.Players.Select(p => $"{p.Name}  {p.RacksWon}"))
+            : string.Join("     ", state.Players.Select(p => $"{p.Name}  {p.Score}"));
+        if (state.Players.All(p => p.IsAI) && !state.MatchOver) subtitle += $"     ·     next {unit} starting";
+        Color accent = state.RackWinner >= 0 ? Ui.Player(state.RackWinner) : Ui.Gold;
         DrawOverlayPanel(g, title, subtitle, accent);
-        if (state.MatchOver && winner != null)
-        {
-            var rnd = new Random((int)(clock * 7));
-            if (rnd.NextDouble() < 0.12)
-                fx.Burst(new Vec2(rnd.NextDouble() * Table.Width, rnd.NextDouble() * Table.Height), rnd.Next(2) == 0 ? Theme.Cyan : Theme.Magenta, 18, 220);
-        }
     }
 
     // ================================================================== screenshots

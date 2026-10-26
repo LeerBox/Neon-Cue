@@ -15,15 +15,6 @@ sealed class MenuScreen : IScreen
         public RectangleF Rect;
     }
 
-    sealed class Floater
-    {
-        public PointF Pos;
-        public PointF Vel;
-        public int Number;
-        public Mat3 Ori;
-        public Vec3 Axis;
-    }
-
     static readonly GameMode[] Modes = Enum.GetValues<GameMode>();
     static readonly int[] RaceOptions = [1, 3, 5, 7, 9];
     static readonly int[] TargetOptions = [25, 50, 75, 100, 150];
@@ -32,9 +23,6 @@ sealed class MenuScreen : IScreen
     readonly AppSettings cfg;
     readonly List<Row> rows = new();
     readonly List<UiButton> buttons = new();
-    readonly List<Floater> floaters = new();
-    readonly BallRenderer sprites = new();
-    readonly Random rng = new();
     int selected = -1;
     int hoverRow = -1;
     bool showHelp;
@@ -129,9 +117,9 @@ sealed class MenuScreen : IScreen
         });
 
         buttons.Add(new UiButton { Text = "PLAY", Primary = true, OnClick = Play });
-        buttons.Add(new UiButton { Text = "CUE SHOP", Accent = Theme.Amber, OnClick = host.ShowShop });
+        buttons.Add(new UiButton { Text = "CUE SHOP", OnClick = host.ShowShop });
         buttons.Add(new UiButton { Text = "HOW TO PLAY", OnClick = () => showHelp = true });
-        buttons.Add(new UiButton { Text = "QUIT", Accent = Theme.Magenta, OnClick = host.Quit });
+        buttons.Add(new UiButton { Text = "QUIT", OnClick = host.Quit });
     }
 
     static int Cycle(int[] options, int current, int d)
@@ -147,48 +135,22 @@ sealed class MenuScreen : IScreen
         host.StartGame();
     }
 
-    public void Update(double dt)
-    {
-        time += dt;
-        foreach (var f in floaters)
-        {
-            f.Pos = new PointF(f.Pos.X + f.Vel.X * (float)dt, f.Pos.Y + f.Vel.Y * (float)dt);
-            double sp = Math.Sqrt(f.Vel.X * f.Vel.X + f.Vel.Y * f.Vel.Y);
-            if (sp > 0) f.Ori = Mat3.Rotation(new Vec3(-f.Vel.Y / sp, f.Vel.X / sp, 0), sp * dt / (26 * u)) * f.Ori;
-            if (f.Pos.X < 0 || f.Pos.X > size.Width) f.Vel = new PointF(-f.Vel.X, f.Vel.Y);
-            if (f.Pos.Y < 0 || f.Pos.Y > size.Height) f.Vel = new PointF(f.Vel.X, -f.Vel.Y);
-        }
-    }
+    public void Update(double dt) => time += dt;
+
+    const float ValueX = 230;
 
     void Layout(Size s)
     {
         size = s;
         u = Math.Clamp(Math.Min(s.Width / 1280f, s.Height / 800f), 0.75f, 2.2f);
-        float cx = s.Width / 2f;
-        float w = 620 * u, h = 38 * u, gap = 4 * u, y = 200 * u;
+        float x = 72 * u, w = 560 * u, h = 40 * u, y = 236 * u;
         for (int i = 0; i < rows.Count; i++)
-            rows[i].Rect = new RectangleF(cx - w / 2, y + i * (h + gap), w, h);
-        float by = y + rows.Count * (h + gap) + 44 * u;
-        buttons[0].Rect = new RectangleF(cx - 150 * u, by, 300 * u, 60 * u);
-        buttons[1].Rect = new RectangleF(cx - 295 * u, by + 72 * u, 190 * u, 44 * u);
-        buttons[2].Rect = new RectangleF(cx - 95 * u, by + 72 * u, 190 * u, 44 * u);
-        buttons[3].Rect = new RectangleF(cx + 105 * u, by + 72 * u, 190 * u, 44 * u);
-
-        if (floaters.Count == 0)
-        {
-            for (int i = 0; i < 14; i++)
-            {
-                double a = rng.NextDouble() * Math.PI * 2, sp = 25 + rng.NextDouble() * 45;
-                floaters.Add(new Floater
-                {
-                    Pos = new PointF((float)(rng.NextDouble() * s.Width), (float)(rng.NextDouble() * s.Height)),
-                    Vel = new PointF((float)(Math.Cos(a) * sp), (float)(Math.Sin(a) * sp)),
-                    Number = 1 + i % 15,
-                    Ori = Mat3.RandomResting(rng),
-                    Axis = new Vec3(-Math.Sin(a), Math.Cos(a), 0),
-                });
-            }
-        }
+            rows[i].Rect = new RectangleF(x, y + i * h, w, h);
+        float by = y + rows.Count * h + 54 * u;
+        float bw = (w - 16 * u) / 3;
+        buttons[0].Rect = new RectangleF(x, by, w, 54 * u);
+        for (int i = 1; i < 4; i++)
+            buttons[i].Rect = new RectangleF(x + (i - 1) * (bw + 8 * u), by + 64 * u, bw, 40 * u);
     }
 
     public void Draw(Graphics g, Size s)
@@ -196,42 +158,42 @@ sealed class MenuScreen : IScreen
         Layout(s);
         Theme.Setup(g);
         var full = new Rectangle(Point.Empty, s);
-        using (var bg = new LinearGradientBrush(full, Theme.BgTop, Theme.Bg, 90f)) g.FillRectangle(bg, full);
+        using (var bg = new LinearGradientBrush(full, Theme.Hex("#0E1114"), Ui.Bg, 90f)) g.FillRectangle(bg, full);
 
-        foreach (var f in floaters) sprites.Draw(g, f.Number, f.Ori, 26 * u, f.Pos, 1f);
-        using (var veil = new SolidBrush(Color.FromArgb(185, 7, 6, 15))) g.FillRectangle(veil, full);
-
-        // Scanlines + glow spot.
+        // A soft pool of cloth-coloured light on the right, like a table under a lamp.
         using (var hp = new GraphicsPath())
         {
-            hp.AddEllipse(s.Width / 2f - 520 * u, -160 * u, 1040 * u, 520 * u);
-            using var hb = new PathGradientBrush(hp) { CenterColor = Color.FromArgb(60, 255, 43, 214), SurroundColors = [Color.FromArgb(0, 0, 0, 0)] };
+            var spot = new RectangleF(s.Width * 0.42f, s.Height * 0.08f, s.Width * 0.7f, s.Height * 0.84f);
+            hp.AddEllipse(spot);
+            using var hb = new PathGradientBrush(hp) { CenterColor = Color.FromArgb(70, 30, 92, 70), SurroundColors = [Color.FromArgb(0, 0, 0, 0)] };
             g.FillPath(hb, hp);
         }
-        using (var sl = new Pen(Color.FromArgb(10, 255, 255, 255)))
-            for (int y = 0; y < s.Height; y += 4) g.DrawLine(sl, 0, y, s.Width, y);
+        Ui.Hairline(g, 0, 64 * u, s.Width, 64 * u);
 
-        float cx = s.Width / 2f;
-        double pulse = 0.5 + 0.5 * Math.Sin(time * 2.2);
-        Gfx.GlowText(g, "NEON CUE", Theme.F(98 * u, FontStyle.Bold), Theme.Magenta, Theme.Mix(Color.White, Theme.Magenta, 0.25),
-            new PointF(cx, 108 * u), spread: (float)(4 + pulse * 2) * u, layers: 5, alpha: 30);
-        Gfx.Text(g, "SMART BILLIARDS  •  7 GAME MODES  •  4 AI LEVELS", Theme.F(17 * u, FontStyle.Bold), Theme.Cyan,
-            new RectangleF(0, 160 * u, s.Width, 30 * u), StringAlignment.Center);
+        float x = 72 * u;
+        Ui.Tracked(g, "NEON CUE", Ui.Head(64 * u), Ui.Text, x, 128 * u, 8 * u);
+        using (var gb = new SolidBrush(Ui.Gold)) g.FillRectangle(gb, x, 170 * u, 80 * u, 2 * u);
+        Ui.Tracked(g, "PROFESSIONAL BILLIARDS", Ui.Head(14 * u), Ui.Text2, x, 194 * u, 4 * u);
 
+        var first = rows[0].Rect;
+        var card = new RectangleF(first.X - 1, first.Y - 1, first.Width + 2, rows.Count * first.Height + 2);
+        Ui.Shadow(g, card, 6 * u, 10 * u);
+        Ui.Card(g, card, 6 * u);
         for (int i = 0; i < rows.Count; i++) DrawRow(g, rows[i], i);
 
         var rules = GameRules.Create(cfg.Mode);
-        var last = rows[^1].Rect;
-        Gfx.Text(g, rules.Tagline, Theme.F(15 * u), Theme.TextDim, new RectangleF(0, last.Bottom + 10 * u, s.Width, 30 * u), StringAlignment.Center);
+        Ui.Write(g, rules.Tagline, Ui.Body(14 * u), Ui.Text2, new RectangleF(x, card.Bottom + 10 * u, card.Width, 24 * u));
 
         foreach (var b in buttons) b.Draw(g, u);
 
-        Gfx.Text(g, "↑↓ select   ←→ change   Enter play   C cue shop   F1 help", Theme.F(13 * u), Theme.A(Theme.TextDim, 170),
-            new RectangleF(0, s.Height - 34 * u, s.Width, 24 * u), StringAlignment.Center);
         var cue = cfg.Equipped;
-        Gfx.Text(g, $"COINS  {cfg.Coins:N0}", Theme.F(18 * u, FontStyle.Bold), Theme.Amber, new RectangleF(s.Width - 336 * u, 20 * u, 310 * u, 26 * u), StringAlignment.Far);
-        Gfx.Text(g, $"CUE  {cue.Name}", Theme.F(14 * u, FontStyle.Bold), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 336 * u, 46 * u, 310 * u, 22 * u), StringAlignment.Far);
-        Gfx.Text(g, "v1.10", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
+        Ui.Tracked(g, "COINS", Ui.Head(12 * u), Ui.Text3, s.Width - 260 * u, 32 * u, 2.5f * u);
+        Ui.Write(g, cfg.Coins.ToString("N0"), Ui.Num(20 * u), Ui.Gold, new RectangleF(s.Width - 200 * u, 18 * u, 170 * u, 28 * u), StringAlignment.Far);
+        Ui.Write(g, cue.Name, Ui.BodyStrong(14 * u), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 460 * u, 18 * u, 180 * u, 28 * u), StringAlignment.Far);
+
+        Ui.Hairline(g, 0, s.Height - 44 * u, s.Width, s.Height - 44 * u);
+        Ui.Tracked(g, "↑↓ SELECT    ←→ CHANGE    ENTER PLAY    C CUE SHOP    F1 HELP", Ui.Head(11 * u), Ui.Text3, x, s.Height - 22 * u, 1.8f * u);
+        Ui.Tracked(g, "V1.11", Ui.Head(11 * u), Ui.Text3, s.Width - 24 * u, s.Height - 22 * u, 1.8f * u, StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
     }
@@ -241,33 +203,37 @@ sealed class MenuScreen : IScreen
         bool enabled = row.Enabled();
         bool active = enabled && (index == selected || index == hoverRow);
         var r = row.Rect;
-        using var path = Gfx.RoundRect(r, 12 * u);
-        using (var br = new SolidBrush(Theme.A(active ? Theme.PanelLight : Theme.Panel, 225))) g.FillPath(br, path);
-        if (active) Gfx.GlowPath(g, path, Theme.Cyan, 1.3f * u, 2.5f * u, 3, 34);
-        else using (var pen = new Pen(Theme.A(Theme.Violet, 70), 1f * u)) g.DrawPath(pen, path);
+        if (active)
+        {
+            using var br = new SolidBrush(Ui.Panel2);
+            g.FillRectangle(br, r.X + 1, r.Y, r.Width - 2, r.Height);
+            using var gb = new SolidBrush(Ui.Gold);
+            g.FillRectangle(gb, r.X + 1, r.Y, 3 * u, r.Height);
+        }
+        if (index > 0) Ui.Hairline(g, r.X + 16 * u, r.Y, r.Right - 16 * u, r.Y);
 
-        int alpha = enabled ? 255 : 90;
-        Gfx.Text(g, row.Label, Theme.F(15 * u, FontStyle.Bold), Theme.A(Theme.TextDim, alpha), new RectangleF(r.X + 22 * u, r.Y, 220 * u, r.Height));
+        float cy = r.Y + r.Height / 2;
+        Ui.Tracked(g, row.Label, Ui.Head(12 * u), enabled ? (active ? Ui.Text2 : Ui.Text3) : Color.FromArgb(90, Ui.Text3), r.X + 22 * u, cy, 2.2f * u);
 
-        float vx = r.X + 270 * u, vw = r.Right - 20 * u - vx;
-        Gfx.Text(g, row.Value(), Theme.F(19 * u, FontStyle.Bold), Theme.A(Theme.Text, alpha), new RectangleF(vx, r.Y, vw, r.Height), StringAlignment.Center);
+        float vx = r.X + ValueX * u, vw = r.Right - 18 * u - vx;
+        Color vc = enabled ? (active ? Color.White : Ui.Text) : Color.FromArgb(80, Ui.Text);
+        Ui.Write(g, row.Value(), Ui.BodyStrong(15 * u), vc, new RectangleF(vx, r.Y, vw, r.Height), StringAlignment.Center);
         if (enabled)
         {
-            Color ac = active ? Theme.Cyan : Theme.A(Theme.Cyan, 140);
-            Gfx.Triangle(g, new PointF(vx + 10 * u, r.Y + r.Height / 2), 12 * u, false, ac);
-            Gfx.Triangle(g, new PointF(vx + vw - 10 * u, r.Y + r.Height / 2), 12 * u, true, ac);
+            Color ac = active ? Ui.Gold : Ui.Text3;
+            Ui.Chevron(g, new PointF(vx + 8 * u, cy), 10 * u, false, ac, 1.4f * u);
+            Ui.Chevron(g, new PointF(vx + vw - 8 * u, cy), 10 * u, true, ac, 1.4f * u);
         }
     }
 
     void DrawHelp(Graphics g, Size s)
     {
-        using (var dim = new SolidBrush(Color.FromArgb(200, 4, 3, 10))) g.FillRectangle(dim, new Rectangle(Point.Empty, s));
+        Ui.Scrim(g, s, 200);
         var r = new RectangleF(s.Width / 2f - 430 * u, s.Height / 2f - 330 * u, 860 * u, 660 * u);
-        using var path = Gfx.RoundRect(r, 20 * u);
-        using (var br = new SolidBrush(Theme.A(Theme.Panel, 245))) g.FillPath(br, path);
-        Gfx.GlowPath(g, path, Theme.Cyan, 1.5f * u, 3 * u, 4, 30);
-
-        Gfx.GlowText(g, "HOW TO PLAY", Theme.F(34 * u, FontStyle.Bold), Theme.Cyan, Color.White, new PointF(r.X + r.Width / 2, r.Y + 42 * u));
+        Ui.Shadow(g, r, 6 * u, 14 * u);
+        Ui.Card(g, r, 6 * u, 250);
+        using (var gb = new SolidBrush(Ui.Gold)) g.FillRectangle(gb, r.X, r.Y, r.Width, 3 * u);
+        Ui.Heading(g, "How to play", r.X + r.Width / 2, r.Y + 44 * u, u, 26);
 
         string controls =
             "Aim — move the mouse; the cue follows it.\n" +
@@ -278,21 +244,21 @@ sealed class MenuScreen : IScreen
             "Ball in hand — move the cue ball, click to place; click it again to pick up.\n" +
             "H — ask the AI coach for a shot.   G — aim guide.   F — fast forward.\n" +
             "M — sound.   Esc — pause menu.   C (in menu) — cue shop: better cues hit harder, spin more, wobble less.";
-        Gfx.Text(g, "CONTROLS", Theme.F(16 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(r.X + 40 * u, r.Y + 80 * u, 300 * u, 24 * u));
-        Gfx.WrappedText(g, controls, Theme.F(15 * u), Theme.Text, new RectangleF(r.X + 40 * u, r.Y + 108 * u, r.Width - 80 * u, 220 * u));
+        Ui.Tracked(g, "CONTROLS", Ui.Head(13 * u), Ui.Gold, r.X + 40 * u, r.Y + 96 * u, 2.5f * u);
+        Gfx.WrappedText(g, controls, Ui.Body(14 * u), Ui.Text, new RectangleF(r.X + 40 * u, r.Y + 110 * u, r.Width - 80 * u, 220 * u));
 
-        Gfx.Text(g, "GAME MODES", Theme.F(16 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(r.X + 40 * u, r.Y + 330 * u, 300 * u, 24 * u));
+        Ui.Tracked(g, "GAME MODES", Ui.Head(13 * u), Ui.Gold, r.X + 40 * u, r.Y + 344 * u, 2.5f * u);
         float y = r.Y + 360 * u;
         foreach (var m in Modes)
         {
             var rules = GameRules.Create(m);
-            Gfx.Text(g, rules.Name, Theme.F(15 * u, FontStyle.Bold), Theme.Cyan, new RectangleF(r.X + 40 * u, y, 150 * u, 24 * u));
-            Gfx.Text(g, rules.Tagline, Theme.F(14 * u), Theme.TextDim, new RectangleF(r.X + 190 * u, y, r.Width - 230 * u, 24 * u));
+            Ui.Write(g, rules.Name, Ui.BodyStrong(14 * u), Ui.Text, new RectangleF(r.X + 40 * u, y, 150 * u, 24 * u));
+            Ui.Write(g, rules.Tagline, Ui.Body(14 * u), Ui.Text2, new RectangleF(r.X + 190 * u, y, r.Width - 230 * u, 24 * u));
             y += 30 * u;
         }
-        Gfx.Text(g, "Fouls give your opponent ball in hand anywhere on the table.", Theme.F(14 * u), Theme.Amber,
+        Ui.Write(g, "Fouls give your opponent ball in hand anywhere on the table.", Ui.Body(14 * u), Ui.Warn,
             new RectangleF(r.X + 40 * u, y + 6 * u, r.Width - 80 * u, 24 * u));
-        Gfx.Text(g, "Click anywhere or press Esc to close", Theme.F(13 * u), Theme.TextDim, new RectangleF(r.X, r.Bottom - 40 * u, r.Width, 24 * u), StringAlignment.Center);
+        Ui.Write(g, "Click anywhere or press Esc to close", Ui.Body(13 * u), Ui.Text3, new RectangleF(r.X, r.Bottom - 40 * u, r.Width, 24 * u), StringAlignment.Center);
     }
 
     public void MouseMove(MouseEventArgs e)
@@ -310,7 +276,7 @@ sealed class MenuScreen : IScreen
         if (i < 0 || !rows[i].Enabled()) return;
         selected = i;
         var r = rows[i].Rect;
-        float mid = r.X + 270 * u + (r.Right - 20 * u - (r.X + 270 * u)) / 2;
+        float mid = r.X + ValueX * u + (r.Right - 18 * u - (r.X + ValueX * u)) / 2;
         int d = e.Button == MouseButtons.Right || e.X < mid ? -1 : 1;
         rows[i].Change(d);
         host.Sound.Click();
