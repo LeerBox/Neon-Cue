@@ -91,6 +91,7 @@ sealed class BallRenderer : IDisposable
     readonly Bitmap?[] cache = new Bitmap?[MaxBalls];
     readonly Mat3[] cachedOri = new Mat3[MaxBalls];
     readonly bool[] valid = new bool[MaxBalls];
+    readonly int[] cachedFrac = new int[MaxBalls];
     bool snooker;
     float radius = -1;
     TableStyle style;
@@ -105,7 +106,17 @@ sealed class BallRenderer : IDisposable
     /// Re-renders every stale sprite in one go, in parallel across cores (each ball's pixels are
     /// independent), then uploads them; afterwards <see cref="Get"/> is a cache hit.
     /// </summary>
-    public void Prepare(IReadOnlyList<(int n, Mat3 ori)> balls, float r)
+    public void Prepare(IReadOnlyList<(int n, Mat3 ori)> balls, float r) => Prepare(balls.Select(b => (b.n, b.ori, 0)).ToList(), r);
+
+    /// <summary>Quarter-pixel phase of a screen position, packed as fx + 4*fy (0..15).</summary>
+    public static int Frac(PointF p) =>
+        (int)Math.Floor((p.X - Math.Floor(p.X)) * 4) + 4 * (int)Math.Floor((p.Y - Math.Floor(p.Y)) * 4);
+
+    /// <summary>
+    /// Like <see cref="Prepare(IReadOnlyList{ValueTuple{int, Mat3}}, float)"/>, but each sprite is rendered
+    /// at its quarter-pixel screen phase so it can be blitted unscaled (no resampling) and still move smoothly.
+    /// </summary>
+    public void Prepare(IReadOnlyList<(int n, Mat3 ori, int frac)> balls, float r)
     {
         if (Math.Abs(r - radius) > 0.01f || style != Look.Style || snooker != Look.Snooker)
         {
@@ -116,23 +127,24 @@ sealed class BallRenderer : IDisposable
         }
         // A turn smaller than about half a pixel at the rim is invisible: keep the cached sprite.
         double tol = 1.2 / Math.Max(4, r);
-        var stale = new List<(int n, Mat3 ori)>();
-        foreach (var (n, ori) in balls)
-            if (cache[n] == null || !valid[n] || !cachedOri[n].NearlyEquals(ori, tol)) stale.Add((n, ori));
+        var stale = new List<(int n, Mat3 ori, int frac)>();
+        foreach (var (n, ori, frac) in balls)
+            if (cache[n] == null || !valid[n] || cachedFrac[n] != frac || !cachedOri[n].NearlyEquals(ori, tol)) stale.Add((n, ori, frac));
         if (stale.Count == 0) return;
 
-        int size = (int)Math.Ceiling(r * 2) + 2;
+        int size = (int)Math.Ceiling(r * 2) + 3;
         EnsureGlyphs();
         var canvases = new PixelCanvas[stale.Count];
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         Parallel.For(0, stale.Count, i =>
         {
             canvases[i] = new PixelCanvas(size, size);
-            Render(canvases[i], stale[i].n, stale[i].ori, r);
+            Render(canvases[i], stale[i].n, stale[i].ori, r, stale[i].frac);
         });
         for (int i = 0; i < stale.Count; i++)
         {
-            var (n, ori) = stale[i];
+            var (n, ori, frac) = stale[i];
+            cachedFrac[n] = frac;
             cache[n] ??= new Bitmap(size, size, PixelFormat.Format32bppPArgb);
             canvases[i].CopyTo(cache[n]!);
             cachedOri[n] = ori;
@@ -192,14 +204,15 @@ sealed class BallRenderer : IDisposable
 
     static readonly Dictionary<(int size, float r, TableStyle style), Geometry> geometries = new();
 
-    static Geometry GeometryFor(int size, float r)
+    static Geometry GeometryFor(int size, float r, int frac = 0)
     {
-        var key = (size, r, Look.Style);
+        var key = (size * 16 + frac, r, Look.Style);
         lock (geometries)
         {
             if (geometries.TryGetValue(key, out var geo)) return geo;
             const int ss = 2;
-            float center = size / 2f;
+            // Ball centre, shifted by the sprite's quarter-pixel screen phase.
+            float cx = size / 2 + (frac % 4) / 4f, cy = size / 2 + (frac / 4) / 4f; // integer centre + phase
             Rgb felt = Look.Felt;
             var pix = new List<int>();
             var nrm = new List<Vec3>();
@@ -213,7 +226,7 @@ sealed class BallRenderer : IDisposable
                     for (int sy = 0; sy < ss; sy++)
                         for (int sx = 0; sx < ss; sx++)
                         {
-                            double x = (px + (sx + 0.5) / ss - center) / r, y = (py + (sy + 0.5) / ss - center) / r;
+                            double x = (px + (sx + 0.5) / ss - cx) / r, y = (py + (sy + 0.5) / ss - cy) / r;
                             double d2 = x * x + y * y;
                             if (d2 >= 1) continue;
                             var n = new Vec3(x, y, Math.Sqrt(1 - d2));
@@ -239,10 +252,10 @@ sealed class BallRenderer : IDisposable
         }
     }
 
-    static void Render(PixelCanvas c, int n, Mat3 ori, float r)
+    static void Render(PixelCanvas c, int n, Mat3 ori, float r, int frac = 0)
     {
         EnsureGlyphs();
-        var geo = GeometryFor(c.Width, r);
+        var geo = GeometryFor(c.Width, r, frac);
         int count = c.Width * c.Height;
         var accR = new float[count];
         var accG = new float[count];

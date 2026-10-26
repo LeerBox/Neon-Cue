@@ -1185,23 +1185,39 @@ sealed class GameScreen : IScreen, IPhysicsListener
             shadowRadius = pr;
         }
         float sw = shadowSprite.Width * invScale;
-        var toDraw = new List<(int, Mat3)>();
-        foreach (var b in state.Balls) if (!b.Pocketed) toDraw.Add((b.Number, orient[b.Number]));
-        foreach (var sk in sinks) toDraw.Add((sk.Number, orient[sk.Number]));
+        // Balls and shadows are blitted 1:1 in screen space (no resampling): each ball sprite is
+        // rendered at its quarter-pixel phase, so motion stays sub-pixel smooth.
+        var toDraw = new List<(int, Mat3, int)>();
+        var screenPos = new Dictionary<int, PointF>();
+        foreach (var b in state.Balls)
+        {
+            if (b.Pocketed) continue;
+            var sp = view.ToScreen(DrawPos(b));
+            screenPos[b.Number] = sp;
+            toDraw.Add((b.Number, orient[b.Number], BallRenderer.Frac(sp)));
+        }
+        foreach (var sk in sinks) toDraw.Add((sk.Number, orient[sk.Number], 0));
         balls3d.Prepare(toDraw, pr);
+
+        var world = g.Transform;
+        g.ResetTransform();
+        int half = shadowSprite.Width / 2;
         foreach (var b in state.Balls)
         {
             if (b.Pocketed) continue;
             Vec2 at = DrawPos(b);
-            Vec2 off = (at - Table.CenterSpot) * 0.012 + new Vec2(1.5, 3);
-            g.DrawImage(shadowSprite, (float)(at.X + off.X) - sw / 2, (float)(at.Y + off.Y) - sw / 2, sw, sw);
+            var sp = view.ToScreen(at + (at - Table.CenterSpot) * 0.012 + new Vec2(1.5, 3));
+            g.DrawImageUnscaled(shadowSprite, (int)Math.Round(sp.X) - half, (int)Math.Round(sp.Y) - half);
         }
         foreach (var b in state.Balls)
         {
             if (b.Pocketed) continue;
-            Vec2 at = DrawPos(b);
-            balls3d.Draw(g, b.Number, orient[b.Number], pr, new PointF((float)at.X, (float)at.Y), invScale);
+            var sp = screenPos[b.Number];
+            var bmp = balls3d.Get(b.Number, orient[b.Number], pr);
+            int c = bmp.Width / 2; // matches the sprite's integer centre
+            g.DrawImageUnscaled(bmp, (int)Math.Floor(sp.X) - c, (int)Math.Floor(sp.Y) - c);
         }
+        g.Transform = world;
         foreach (var sk in sinks)
         {
             var p = Vec2.Lerp(sk.From, sk.To, Smooth(sk.T));
