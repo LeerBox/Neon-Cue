@@ -1185,6 +1185,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
             shadowRadius = pr;
         }
         float sw = shadowSprite.Width * invScale;
+        var toDraw = new List<(int, Mat3)>();
+        foreach (var b in state.Balls) if (!b.Pocketed) toDraw.Add((b.Number, orient[b.Number]));
+        foreach (var sk in sinks) toDraw.Add((sk.Number, orient[sk.Number]));
+        balls3d.Prepare(toDraw, pr);
         foreach (var b in state.Balls)
         {
             if (b.Pocketed) continue;
@@ -1426,15 +1430,37 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
     }
 
+    readonly Dictionary<(int w, int h, int color, bool active), Bitmap> cardCache = new();
+
+    /// <summary>Card background and (glowing) border, rendered once per size/state and blitted.</summary>
+    void DrawCardChrome(Graphics g, RectangleF rect, Color accent, bool active)
+    {
+        int pad = (int)Math.Ceiling(16 * u);
+        var key = ((int)rect.Width, (int)rect.Height, accent.ToArgb(), active);
+        if (!cardCache.TryGetValue(key, out var bmp))
+        {
+            if (cardCache.Count > 16) { foreach (var b in cardCache.Values) b.Dispose(); cardCache.Clear(); }
+            bmp = new Bitmap(key.w + pad * 2, key.h + pad * 2, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var cg = Graphics.FromImage(bmp))
+            {
+                Theme.Setup(cg);
+                var r = new RectangleF(pad, pad, key.w, key.h);
+                using var path = Gfx.RoundRect(r, 14 * u);
+                using (var br = new SolidBrush(Theme.A(Theme.Panel, 235))) cg.FillPath(br, path);
+                if (active) Gfx.GlowPath(cg, path, accent, 1.8f * u, 3 * u, 4, 40);
+                else using (var pen = new Pen(Theme.A(accent, 60), 1.2f * u)) cg.DrawPath(pen, path);
+            }
+            cardCache[key] = bmp;
+        }
+        g.DrawImageUnscaled(bmp, (int)rect.X - pad, (int)rect.Y - pad);
+    }
+
     void DrawPlayerCard(Graphics g, int i, RectangleF rect)
     {
         var p = state.Players[i];
         bool active = state.Current == i && !state.RackOver;
         Color accent = Theme.PlayerColor(i);
-        using var path = Gfx.RoundRect(rect, 14 * u);
-        using (var br = new SolidBrush(Theme.A(Theme.Panel, 235))) g.FillPath(br, path);
-        if (active) Gfx.GlowPath(g, path, accent, 1.8f * u, 3 * u, 4, 40);
-        else using (var pen = new Pen(Theme.A(accent, 60), 1.2f * u)) g.DrawPath(pen, path);
+        DrawCardChrome(g, rect, accent, active);
 
         float px = rect.X + 18 * u;
         string tag = (p.IsAI ? $"CPU • {p.Level.ToString().ToUpperInvariant()}" : "HUMAN") + $" • {p.Cue.Name.ToUpperInvariant()}";

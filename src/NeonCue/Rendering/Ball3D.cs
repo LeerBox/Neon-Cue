@@ -48,10 +48,10 @@ struct Mat3
     /// <summary>World direction to ball-local (transpose = inverse for rotations).</summary>
     public Vec3 ToLocal(Vec3 w) => new(M00 * w.X + M10 * w.Y + M20 * w.Z, M01 * w.X + M11 * w.Y + M21 * w.Z, M02 * w.X + M12 * w.Y + M22 * w.Z);
 
-    public bool NearlyEquals(Mat3 o) =>
+    public bool NearlyEquals(Mat3 o, double tolerance = 1e-4) =>
         Math.Abs(M00 - o.M00) + Math.Abs(M01 - o.M01) + Math.Abs(M02 - o.M02) +
         Math.Abs(M10 - o.M10) + Math.Abs(M11 - o.M11) + Math.Abs(M12 - o.M12) +
-        Math.Abs(M20 - o.M20) + Math.Abs(M21 - o.M21) + Math.Abs(M22 - o.M22) < 1e-4;
+        Math.Abs(M20 - o.M20) + Math.Abs(M21 - o.M21) + Math.Abs(M22 - o.M22) < tolerance;
 
     /// <summary>Gram-Schmidt clean-up so accumulated rolling doesn't skew the matrix.</summary>
     public Mat3 Orthonormalized()
@@ -100,6 +100,47 @@ sealed class BallRenderer : IDisposable
     static readonly Rgb Ivory = Rgb.Hex("#F4F1E6");
     static readonly Rgb Ink = Rgb.Hex("#141414");
     static readonly Rgb CueDot = Rgb.Hex("#C8102E");
+
+    /// <summary>
+    /// Re-renders every stale sprite in one go, in parallel across cores (each ball's pixels are
+    /// independent), then uploads them; afterwards <see cref="Get"/> is a cache hit.
+    /// </summary>
+    public void Prepare(IReadOnlyList<(int n, Mat3 ori)> balls, float r)
+    {
+        if (Math.Abs(r - radius) > 0.01f || style != Look.Style || snooker != Look.Snooker)
+        {
+            Dispose();
+            radius = r;
+            style = Look.Style;
+            snooker = Look.Snooker;
+        }
+        // A turn smaller than about half a pixel at the rim is invisible: keep the cached sprite.
+        double tol = 1.2 / Math.Max(4, r);
+        var stale = new List<(int n, Mat3 ori)>();
+        foreach (var (n, ori) in balls)
+            if (cache[n] == null || !valid[n] || !cachedOri[n].NearlyEquals(ori, tol)) stale.Add((n, ori));
+        if (stale.Count == 0) return;
+
+        int size = (int)Math.Ceiling(r * 2) + 2;
+        EnsureGlyphs();
+        var canvases = new PixelCanvas[stale.Count];
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        Parallel.For(0, stale.Count, i =>
+        {
+            canvases[i] = new PixelCanvas(size, size);
+            Render(canvases[i], stale[i].n, stale[i].ori, r);
+        });
+        for (int i = 0; i < stale.Count; i++)
+        {
+            var (n, ori) = stale[i];
+            cache[n] ??= new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+            canvases[i].CopyTo(cache[n]!);
+            cachedOri[n] = ori;
+            valid[n] = true;
+        }
+        RenderMs += (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        Renders += stale.Count;
+    }
 
     public Bitmap Get(int n, Mat3 ori, float r)
     {
