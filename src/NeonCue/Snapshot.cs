@@ -28,6 +28,8 @@ static class Snapshot
         {
             var gs = new GameScreen(host);
             gs.SetupDemo();
+            // Let the background shot simulation (aim prediction) finish before the picture.
+            for (int i = 0; i < 40; i++) { gs.Update(1 / 60.0); gs.Draw(g, bmp.Size); Thread.Sleep(15); }
             screen = gs;
         }
         else if (what.StartsWith("watch"))
@@ -44,6 +46,7 @@ static class Snapshot
                 screen.Update(1 / 60.0);
                 if (frame % 30 == 0) { screen.Draw(g, bmp.Size); Thread.Sleep(2); }
             }
+            if (Environment.GetEnvironmentVariable("NEONCUE_STATS") == "1") ((GameScreen)screen).DebugShowStats();
         }
         else if (what == "shop")
         {

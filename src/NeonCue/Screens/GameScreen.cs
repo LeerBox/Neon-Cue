@@ -1615,6 +1615,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal void DebugSetSpin(double side, double top) { spinSide = side; spinTop = top; }
     internal void DebugSetGuide(AimGuide guide) => cfg.Guide = guide;
     internal void DebugSetAssist(AimAssist assist) => cfg.Assist = assist;
+    internal void DebugShowStats() => showStats = true;
 
     /// <summary>What the aim guide currently promises: first ball hit and its departure direction.</summary>
     internal (int ball, Vec2 objDir)? PredictedHit()

@@ -39,6 +39,8 @@ jobs:
           foreach ($m in 'snooker','watchsnooker','game','menu') {
             Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--render',"shots/$m.png",$m -Wait
           }
+          $env:NEONCUE_STATS = '1'
+          Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--render','shots/scoreboard.png','watchsnooker' -Wait
       - uses: actions/upload-artifact@v4
         if: always()
         with:

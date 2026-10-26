@@ -475,9 +475,12 @@ public static class AIPlayer
         double[] powers = prof.Safety ? [0.12, 0.2, 0.32, 0.5] : [0.25, 0.45];
         double[] offsets = prof.Safety ? [-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9] : [-0.5, 0, 0.5];
 
-        foreach (var t in s.Balls)
+        // The eight nearest legal balls are where realistic safeties come from (15 reds would
+        // multiply the search without adding options).
+        var legal = s.Balls.Where(t => t.Number != 0 && !t.Pocketed && rules.IsLegalFirstContact(s, t.Number))
+            .OrderBy(t => Vec2.DistanceSq(t.Pos, cue)).Take(8);
+        foreach (var t in legal)
         {
-            if (t.Number == 0 || t.Pocketed || !rules.IsLegalFirstContact(s, t.Number)) continue;
             Vec2 v = t.Pos - cue;
             double dist = v.Length;
             if (dist < 2 * R) continue;
