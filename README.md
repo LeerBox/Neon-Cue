@@ -7,11 +7,18 @@ playing them out in that same engine.
 ![Main menu](docs/menu.png)
 ![Classic green table](docs/gameplay.png)
 ![Tournament blue table](docs/table-blue.png)
+![Snooker](docs/snooker.png)
 ![Cue shop](docs/shop.png)
 
 ## Features
 
-- **6 game modes**: 8-Ball, 9-Ball, 10-Ball, Straight Pool (14.1-style, endless re-racks), Rotation 61, and solo Practice.
+- **7 game modes**: 8-Ball, 9-Ball, 10-Ball, Straight Pool (14.1-style, endless re-racks), Rotation 61, solo Practice, and **Snooker**.
+- **Snooker**:
+  - A full 12-ft table: smaller 52.5 mm balls, tighter pockets, the baulk line and D, and colour spots.
+  - 15 reds and six colours, played red, then a colour. Colours are respotted while reds remain, then taken in order.
+  - Fouls award at least 4 points, and an in-off gives the opponent ball in hand in the D. Matches are played as best-of frames.
+  - The HUD shows the ball on, the current break, points remaining, and a *snookers needed* warning.
+  - The AI picks colours by value (it goes for the black), plays safety, opens with a safe break-off rather than a power break, and concedes frames it can no longer win.
 - **Opponents**: you vs CPU, 2 players on one PC (hot seat), or CPU vs CPU (watch mode).
 - **4 AI levels**: Rookie, Amateur, Pro and Master. Each level searches more shots and has a steadier stroke than the one below.
 - **Cue shop**: 8 cues from a free House Cue to the 50,000-coin Black Diamond Royale. Every stat changes the physics (see below). You earn coins by potting balls and beating the CPU.

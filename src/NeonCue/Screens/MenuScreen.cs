@@ -209,7 +209,7 @@ sealed class MenuScreen : IScreen
         double pulse = 0.5 + 0.5 * Math.Sin(time * 2.2);
         Gfx.GlowText(g, "NEON CUE", Theme.F(98 * u, FontStyle.Bold), Theme.Magenta, Theme.Mix(Color.White, Theme.Magenta, 0.25),
             new PointF(cx, 108 * u), spread: (float)(4 + pulse * 2) * u, layers: 5, alpha: 30);
-        Gfx.Text(g, "SMART BILLIARDS  •  6 GAME MODES  •  4 AI LEVELS", Theme.F(17 * u, FontStyle.Bold), Theme.Cyan,
+        Gfx.Text(g, "SMART BILLIARDS  •  7 GAME MODES  •  4 AI LEVELS", Theme.F(17 * u, FontStyle.Bold), Theme.Cyan,
             new RectangleF(0, 160 * u, s.Width, 30 * u), StringAlignment.Center);
 
         for (int i = 0; i < rows.Count; i++) DrawRow(g, rows[i], i);
@@ -225,7 +225,7 @@ sealed class MenuScreen : IScreen
         var cue = cfg.Equipped;
         Gfx.Text(g, $"COINS  {cfg.Coins:N0}", Theme.F(18 * u, FontStyle.Bold), Theme.Amber, new RectangleF(s.Width - 336 * u, 20 * u, 310 * u, 26 * u), StringAlignment.Far);
         Gfx.Text(g, $"CUE  {cue.Name}", Theme.F(14 * u, FontStyle.Bold), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 336 * u, 46 * u, 310 * u, 22 * u), StringAlignment.Far);
-        Gfx.Text(g, "v1.7", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
+        Gfx.Text(g, "v1.8", Theme.F(12 * u), Theme.A(Theme.TextDim, 120), new RectangleF(0, s.Height - 34 * u, s.Width - 16 * u, 24 * u), StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
     }
