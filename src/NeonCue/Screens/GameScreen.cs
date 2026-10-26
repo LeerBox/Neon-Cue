@@ -1115,6 +1115,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         float cx = w / 2;
         Gfx.GlowText(g, rules.Name.ToUpperInvariant(), Theme.F(26 * u, FontStyle.Bold), Theme.Magenta, Color.White, new PointF(cx, y + 18 * u), spread: 3 * u, layers: 3);
         string sub = rules.IsSolo ? $"RACK {state.RackNumber}"
+            : rules.Mode == GameMode.Snooker ? (state.RaceTo == 1 ? "SINGLE FRAME" : $"BEST OF {2 * state.RaceTo - 1} FRAMES")
             : rules.UsesRaceTo ? (state.RaceTo == 1 ? "SINGLE RACK" : $"RACE TO {state.RaceTo}")
             : $"FIRST TO {state.TargetScore}";
         Gfx.Text(g, sub, Theme.F(13 * u, FontStyle.Bold), Theme.TextDim, new RectangleF(cx - 150 * u, y + 34 * u, 300 * u, 20 * u), StringAlignment.Center);
@@ -1183,7 +1184,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         string hint = phase switch
         {
             Phase.Placing when HumanTurn => state.KitchenOnly
-                ? "BALL IN HAND — place the cue ball behind the head string, then click"
+                ? Table.HasD ? "BALL IN HAND — place the cue ball in the D, then click" : "BALL IN HAND — place the cue ball behind the head string, then click"
                 : "BALL IN HAND — move the cue ball anywhere, then click to place",
             Phase.Aiming when HumanTurn => state.BallInHand
                 ? "Drag back & release to shoot  •  click the cue ball to move it  •  Ctrl: precise aim  •  H: coach"

@@ -83,7 +83,7 @@ public static class Table
         bool snooker = kind == TableKind.Snooker;
         // Snooker: 52.5 mm balls on a 3569 mm bed, and tighter pockets than pool.
         double r = snooker ? 7.4 : 11.25;
-        double cg = (snooker ? 2.47 : 3.0) * r, sg = (snooker ? 1.75 : 2.15) * r;
+        double cg = (snooker ? 2.7 : 3.0) * r, sg = (snooker ? 1.95 : 2.15) * r;
 
         static Vec2 Mx(Vec2 p) => new(W - p.X, p.Y);
         static Vec2 My(Vec2 p) => new(p.X, H - p.Y);
