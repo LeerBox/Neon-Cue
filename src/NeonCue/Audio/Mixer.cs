@@ -25,7 +25,7 @@ public sealed class Mixer
     readonly List<Voice> active = new();
     long frame;
 
-    public float MasterGain { get; set; } = 0.75f;
+    public float MasterGain { get; set; } = 0.65f;
 
     /// <summary>Total voices ever started and voices dropped by the polyphony cap (for tests).</summary>
     public int Started { get; private set; }
@@ -88,11 +88,11 @@ public sealed class Mixer
         frame += frames;
     }
 
-    /// <summary>Soft limiter: linear up to 0.6, then compresses smoothly instead of clipping.</summary>
+    /// <summary>Soft limiter: linear up to 0.5, then compresses smoothly; it can never exceed 95% of full scale.</summary>
     static short ToPcm(float x)
     {
         float a = Math.Abs(x);
-        if (a > 0.6f) x = Math.Sign(x) * (0.6f + 0.4f * (float)Math.Tanh((a - 0.6f) / 0.4f));
+        if (a > 0.5f) x = Math.Sign(x) * (0.5f + 0.45f * (float)Math.Tanh((a - 0.5f) / 0.45f));
         return (short)(x * 32000);
     }
 }

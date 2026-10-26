@@ -131,11 +131,28 @@ public static class AIPlayer
             .Take(prof.Candidates)
             .ToList();
 
-        var trials = new List<Trial>();
+        // Solve throw once per line and spin (at the planned speed) and reuse it across the power
+        // variations; the remaining speed dependence of throw is tiny.
+        var lines = new List<(Candidate c, double side, double top)>();
         foreach (var c in cands)
+            foreach (var (side, top) in prof.Spins)
+                lines.Add((c, side, top));
+        var solved = new double[lines.Count];
+        Parallel.For(0, lines.Count, i =>
+        {
+            var (c, side, top) = lines[i];
+            solved[i] = c.Target > 0
+                ? ShotSolver.RefineAim(s, c.Target, c.AimPoint, c.Angle, c.Power, side, top, s.CurrentPlayer.Cue, iterations: 3)
+                : c.Angle;
+        });
+
+        var trials = new List<Trial>();
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var (c, side, top) = lines[i];
             foreach (var m in prof.PowerMuls)
-                foreach (var (side, top) in prof.Spins)
-                    trials.Add(new Trial { Angle = c.Angle, Power = Math.Clamp(c.Power * m, 0.04, 1), Side = side, Top = top, Plan = c.Plan, Target = c.Target, AimPoint = c.AimPoint });
+                trials.Add(new Trial { Angle = solved[i], Power = Math.Clamp(c.Power * m, 0.04, 1), Side = side, Top = top, Plan = c.Plan });
+        }
         RunTrials(s, rules, prof, trials);
 
         Trial? best = null;
