@@ -146,8 +146,47 @@ static class Gfx
         g.DrawLine(core, a, b);
     }
 
+    static readonly Dictionary<(string, float, FontStyle, int, int, float, int, int, StringAlignment), (Bitmap bmp, PointF anchor)> glowCache = new();
+
+    /// <summary>Glowing text, rendered once into a cached bitmap and blitted (fades share 16 alpha levels).</summary>
     public static void GlowText(Graphics g, string text, Font font, Color glow, Color core, PointF pt,
         StringAlignment align = StringAlignment.Center, float spread = 4, int layers = 4, int alpha = 34)
+    {
+        static int Q(Color c) => (c.A / 16 * 16 << 24) | (c.R << 16) | (c.G << 8) | c.B;
+        var key = (text, font.Size, font.Style, Q(glow), Q(core), spread, layers, alpha / 4 * 4, align);
+        if (!glowCache.TryGetValue(key, out var entry))
+        {
+            if (glowCache.Count > 300)
+            {
+                foreach (var v in glowCache.Values) v.bmp.Dispose();
+                glowCache.Clear();
+            }
+            entry = RenderGlowText(text, font, Color.FromArgb(glow.A / 16 * 16, glow), Color.FromArgb(core.A / 16 * 16, core), align, spread, layers, alpha / 4 * 4);
+            glowCache[key] = entry;
+        }
+        g.DrawImageUnscaled(entry.bmp, (int)Math.Round(pt.X - entry.anchor.X), (int)Math.Round(pt.Y - entry.anchor.Y));
+    }
+
+    static (Bitmap, PointF) RenderGlowText(string text, Font font, Color glow, Color core, StringAlignment align, float spread, int layers, int alpha)
+    {
+        using var measure = new GraphicsPath(FillMode.Winding);
+        using var sf0 = new StringFormat { Alignment = align, LineAlignment = StringAlignment.Center };
+        measure.AddString(text, font.FontFamily, (int)font.Style, font.Size, PointF.Empty, sf0);
+        var b = measure.GetBounds();
+        float pad = spread * layers + 4;
+        int w = Math.Max(1, (int)Math.Ceiling(b.Width + pad * 2)), h = Math.Max(1, (int)Math.Ceiling(b.Height + pad * 2));
+        var bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        var anchor = new PointF(pad - b.X, pad - b.Y);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            Theme.Setup(g);
+            GlowTextDirect(g, text, font, glow, core, anchor, align, spread, layers, alpha);
+        }
+        return (bmp, anchor);
+    }
+
+    static void GlowTextDirect(Graphics g, string text, Font font, Color glow, Color core, PointF pt,
+        StringAlignment align, float spread, int layers, int alpha)
     {
         // Winding fill: variable fonts like Bahnschrift have overlapping contours.
         using var path = new GraphicsPath(FillMode.Winding);

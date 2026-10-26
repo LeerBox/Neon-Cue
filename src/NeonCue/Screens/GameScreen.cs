@@ -208,6 +208,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         Physics.Strike(state.Cue, angle, power, side, top, stick, state.IsBreakShot);
         events = new ShotEvents();
         physicsAcc = 0;
+        SnapInterpolation();
         rollTime = 0;
         phase = Phase.Rolling;
         phaseTime = 0;
@@ -403,6 +404,19 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
     }
 
+    // Physics runs in fixed 1/480 s steps, frames don't line up with them; drawing each ball between
+    // its last two physics positions (by the leftover time) keeps motion perfectly even at any frame rate.
+    readonly Vec2[] prevPos = new Vec2[BallRenderer.MaxBalls];
+    double interpAlpha = 1;
+
+    void SnapInterpolation()
+    {
+        foreach (var b in state.Balls) prevPos[b.Number] = b.Pos;
+        interpAlpha = 1;
+    }
+
+    Vec2 DrawPos(Ball b) => phase == Phase.Rolling && !b.Pocketed ? Vec2.Lerp(prevPos[b.Number], b.Pos, interpAlpha) : b.Pos;
+
     void UpdateRolling(double dt)
     {
         physicsAcc += dt * (fastForward ? 4 : 1);
@@ -412,6 +426,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         {
             physicsAcc -= Physics.Dt;
             rollTime += Physics.Dt;
+            foreach (var b in state.Balls) prevPos[b.Number] = b.Pos;
             if (!Physics.Step(state.Balls, events, this)) { moving = false; break; }
             ApplySpin(Physics.Dt);
         }
@@ -420,6 +435,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             foreach (var b in state.Balls) b.Stop();
             moving = false;
         }
+        interpAlpha = Math.Clamp(physicsAcc / Physics.Dt, 0, 1);
         if (!moving) FinishShot();
     }
 
@@ -1150,6 +1166,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
         // Soft shadows cast away from the lamp above the table centre, then the balls.
         float invScale = 1f / view.Scale;
+        // Sprites are drawn at their native size: plain bilinear is enough and much cheaper.
+        g.InterpolationMode = InterpolationMode.Bilinear;
         float pr = (float)(R * view.Scale);
         if (shadowSprite == null || Math.Abs(shadowRadius - pr) > 0.01f)
         {
@@ -1161,13 +1179,15 @@ sealed class GameScreen : IScreen, IPhysicsListener
         foreach (var b in state.Balls)
         {
             if (b.Pocketed) continue;
-            Vec2 off = (b.Pos - Table.CenterSpot) * 0.012 + new Vec2(1.5, 3);
-            g.DrawImage(shadowSprite, (float)(b.Pos.X + off.X) - sw / 2, (float)(b.Pos.Y + off.Y) - sw / 2, sw, sw);
+            Vec2 at = DrawPos(b);
+            Vec2 off = (at - Table.CenterSpot) * 0.012 + new Vec2(1.5, 3);
+            g.DrawImage(shadowSprite, (float)(at.X + off.X) - sw / 2, (float)(at.Y + off.Y) - sw / 2, sw, sw);
         }
         foreach (var b in state.Balls)
         {
             if (b.Pocketed) continue;
-            balls3d.Draw(g, b.Number, orient[b.Number], pr, new PointF((float)b.Pos.X, (float)b.Pos.Y), invScale);
+            Vec2 at = DrawPos(b);
+            balls3d.Draw(g, b.Number, orient[b.Number], pr, new PointF((float)at.X, (float)at.Y), invScale);
         }
         foreach (var sk in sinks)
         {
@@ -1617,7 +1637,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal void DebugSetAssist(AimAssist assist) => cfg.Assist = assist;
     internal void DebugShowStats() => showStats = true;
     /// <summary>Where ball <paramref name="n"/> is drawn this frame.</summary>
-    internal Vec2 DrawnPos(int n) => state.Balls[n].Pos;
+    internal Vec2 DrawnPos(int n) => DrawPos(state.Balls[n]);
     internal void DebugBreak()
     {
         var apex = state.ObjectBallsOnTable.OrderBy(b => b.Pos.X).First();

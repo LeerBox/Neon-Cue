@@ -129,49 +129,92 @@ sealed class BallRenderer : IDisposable
         g.DrawImage(bmp, center.X - w / 2, center.Y - h / 2, w, h);
     }
 
-    static void Render(PixelCanvas c, int n, Mat3 ori, float r)
+    /// <summary>
+    /// Per-size geometry: for every sub-sample on the disc, its surface normal and the lighting terms
+    /// (which don't depend on the ball's rotation). Built once; each frame only the texture lookup
+    /// through the current orientation is evaluated.
+    /// </summary>
+    sealed class Geometry
     {
-        EnsureGlyphs();
-        float center = c.Width / 2f;
-        Rgb felt = Look.Felt;
-        const int ss = 2;
-        for (int py = 0; py < c.Height; py++)
+        public int[] PixelOf = [];
+        public Vec3[] Normal = [];
+        public float[] Shade = [];
+        public float[] AddR = [], AddG = [], AddB = [];
+        public int[] Hits = [];
+    }
+
+    static readonly Dictionary<(int size, float r, TableStyle style), Geometry> geometries = new();
+
+    static Geometry GeometryFor(int size, float r)
+    {
+        var key = (size, r, Look.Style);
+        lock (geometries)
         {
-            for (int px = 0; px < c.Width; px++)
+            if (geometries.TryGetValue(key, out var geo)) return geo;
+            const int ss = 2;
+            float center = size / 2f;
+            Rgb felt = Look.Felt;
+            var pix = new List<int>();
+            var nrm = new List<Vec3>();
+            var shade = new List<float>();
+            var ar = new List<float>();
+            var ag = new List<float>();
+            var ab = new List<float>();
+            var hits = new int[size * size];
+            for (int py = 0; py < size; py++)
+                for (int px = 0; px < size; px++)
+                    for (int sy = 0; sy < ss; sy++)
+                        for (int sx = 0; sx < ss; sx++)
+                        {
+                            double x = (px + (sx + 0.5) / ss - center) / r, y = (py + (sy + 0.5) / ss - center) / r;
+                            double d2 = x * x + y * y;
+                            if (d2 >= 1) continue;
+                            var n = new Vec3(x, y, Math.Sqrt(1 - d2));
+                            double diff = Math.Max(0, n.Dot(Light));
+                            double nh = Math.Max(0, n.Dot(Half));
+                            double spec = Math.Pow(nh, 60) * 0.7 + Math.Pow(nh, 700) * 1.5;
+                            double rim = Math.Pow(1 - n.Z, 3);
+                            pix.Add(py * size + px);
+                            nrm.Add(n);
+                            shade.Add((float)(0.2 + 0.86 * diff));
+                            ar.Add((float)(felt.R * 0.16 * rim + spec + rim * 0.06));
+                            ag.Add((float)(felt.G * 0.16 * rim + spec + rim * 0.06));
+                            ab.Add((float)(felt.B * 0.16 * rim + spec + rim * 0.06));
+                            hits[py * size + px]++;
+                        }
+            geo = new Geometry
             {
-                double ar = 0, ag = 0, ab = 0;
-                int hits = 0;
-                for (int sy = 0; sy < ss; sy++)
-                {
-                    for (int sx = 0; sx < ss; sx++)
-                    {
-                        double x = (px + (sx + 0.5) / ss - center) / r;
-                        double y = (py + (sy + 0.5) / ss - center) / r;
-                        double d2 = x * x + y * y;
-                        if (d2 >= 1) continue;
-                        double z = Math.Sqrt(1 - d2);
-                        var nrm = new Vec3(x, y, z);
-                        Rgb col = Shade(n, nrm, ori.ToLocal(nrm), felt);
-                        ar += col.R; ag += col.G; ab += col.B;
-                        hits++;
-                    }
-                }
-                if (hits == 0) continue;
-                double cov = hits / (double)(ss * ss);
-                c.Pixels[py * c.Width + px] = new Rgb(ar / hits, ag / hits, ab / hits).ToPArgb(cov);
-            }
+                PixelOf = pix.ToArray(), Normal = nrm.ToArray(), Shade = shade.ToArray(),
+                AddR = ar.ToArray(), AddG = ag.ToArray(), AddB = ab.ToArray(), Hits = hits,
+            };
+            geometries[key] = geo;
+            return geo;
         }
     }
 
-    static Rgb Shade(int n, Vec3 nrm, Vec3 p, Rgb felt)
+    static void Render(PixelCanvas c, int n, Mat3 ori, float r)
     {
-        Rgb tex = Surface(n, p);
-        double diff = Math.Max(0, nrm.Dot(Light));
-        double nh = Math.Max(0, nrm.Dot(Half));
-        double spec = Math.Pow(nh, 60) * 0.7 + Math.Pow(nh, 700) * 1.5;
-        double rim = Math.Pow(1 - nrm.Z, 3);
-        Rgb col = tex * (0.2 + 0.86 * diff) + felt * (0.16 * rim) + Rgb.White * (spec + rim * 0.06);
-        return col;
+        EnsureGlyphs();
+        var geo = GeometryFor(c.Width, r);
+        int count = c.Width * c.Height;
+        var accR = new float[count];
+        var accG = new float[count];
+        var accB = new float[count];
+        for (int i = 0; i < geo.PixelOf.Length; i++)
+        {
+            Rgb tex = Surface(n, ori.ToLocal(geo.Normal[i]));
+            float sh = geo.Shade[i];
+            int px = geo.PixelOf[i];
+            accR[px] += (float)tex.R * sh + geo.AddR[i];
+            accG[px] += (float)tex.G * sh + geo.AddG[i];
+            accB[px] += (float)tex.B * sh + geo.AddB[i];
+        }
+        for (int px = 0; px < count; px++)
+        {
+            int h = geo.Hits[px];
+            if (h == 0) continue;
+            c.Pixels[px] = new Rgb(accR[px] / h, accG[px] / h, accB[px] / h).ToPArgb(h / 4.0);
+        }
     }
 
     static Rgb Surface(int n, Vec3 p)

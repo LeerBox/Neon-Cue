@@ -52,7 +52,11 @@ sealed class TableView : IDisposable
             }
             cacheKey = key;
         }
+        // Opaque full-window copy: no blending needed.
+        var mode = g.CompositingMode;
+        g.CompositingMode = CompositingMode.SourceCopy;
         g.DrawImageUnscaled(cache, 0, 0);
+        g.CompositingMode = mode;
     }
 
     void DrawScene(Graphics g, Size client)

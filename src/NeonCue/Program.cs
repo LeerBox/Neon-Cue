@@ -26,6 +26,9 @@ static class Program
             Environment.Exit(ok ? 0 : 1);
         }
 
+        // Smooth frames: the UI thread outranks background work, and the GC avoids long pauses.
+        Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
+        System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
         Application.Run(new GameForm());
     }
 }

@@ -102,8 +102,6 @@ public static class AIPlayer
     {
         public Vec2? Placement;
         public double Angle, Power, Side, Top;
-        public int Target = -1;
-        public Vec2 AimPoint;
         public string Plan = "";
         public double Score;
         public double Robust;
@@ -112,6 +110,9 @@ public static class AIPlayer
 
     /// <summary>A shot idea; <see cref="Target"/> leaving towards <see cref="AimPoint"/> is the intent (throw is solved later).</summary>
     sealed record Candidate(double Angle, double Power, double Quality, string Plan, int Target = -1, Vec2 AimPoint = default);
+
+    /// <summary>Leave two cores free so the game keeps drawing smoothly while the CPU thinks.</summary>
+    static readonly ParallelOptions Workers = new() { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 2) };
 
     static AIShot ToShot(Trial t) => new()
     {
@@ -138,7 +139,7 @@ public static class AIPlayer
             foreach (var (side, top) in prof.Spins)
                 lines.Add((c, side, top));
         var solved = new double[lines.Count];
-        Parallel.For(0, lines.Count, i =>
+        Parallel.For(0, lines.Count, Workers, i =>
         {
             var (c, side, top) = lines[i];
             solved[i] = c.Target > 0
@@ -235,17 +236,9 @@ public static class AIPlayer
 
     static void RunTrials(GameState s, GameRules rules, AIProfile prof, List<Trial> trials)
     {
-        Parallel.For(0, trials.Count, i =>
+        Parallel.For(0, trials.Count, Workers, i =>
         {
             var t = trials[i];
-            // Real balls throw: correct the ghost-ball aim for this exact speed and spin first.
-            if (t.Target > 0)
-            {
-                var c = s;
-                if (t.Placement is Vec2 pl) { c = s.Clone(); c.Cue.Pos = pl; }
-                t.Angle = ShotSolver.RefineAim(c, t.Target, t.AimPoint, t.Angle, t.Power, t.Side, t.Top, s.CurrentPlayer.Cue);
-                t.Target = -1;
-            }
             t.Score = Evaluate(s, rules, prof, t, out t.Success);
         });
     }
