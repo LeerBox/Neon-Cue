@@ -9,14 +9,12 @@ public sealed class Ball
     public Vec2 Vel;
     public bool Pocketed;
 
-    /// <summary>Follow (+) / draw (-) applied by the cue, consumed on first ball contact.</summary>
-    public double SpinTop;
-
-    /// <summary>Right (+) / left (-) english, released on cushion contact.</summary>
-    public double SpinSide;
-
-    /// <summary>True once the cue ball's follow/draw has been converted at first contact.</summary>
-    public bool SpinUsed;
+    /// <summary>
+    /// Angular velocity (rad/s) in the table frame: x right, y towards the bottom rail, z down into
+    /// the cloth. A ball rolling with velocity v has W = (vy, -vx, 0) / R; positive Wz is clockwise as
+    /// seen from above (left-hand english on a ball moving up the table).
+    /// </summary>
+    public double Wx, Wy, Wz;
 
     public Ball(int number, Vec2 pos)
     {
@@ -32,14 +30,21 @@ public sealed class Ball
         _ => BallKind.Stripe,
     };
 
-    public bool IsMoving => !Pocketed && (Vel.X != 0 || Vel.Y != 0);
+    /// <summary>Moving across the cloth, or sliding/spinning in a way that will make it move.</summary>
+    public bool IsMoving => !Pocketed && (Vel.X != 0 || Vel.Y != 0 || Wx != 0 || Wy != 0);
+
+    public void Stop()
+    {
+        Vel = Vec2.Zero;
+        Wx = Wy = Wz = 0;
+    }
 
     public Ball Clone() => new(Number, Pos)
     {
         Vel = Vel,
         Pocketed = Pocketed,
-        SpinTop = SpinTop,
-        SpinSide = SpinSide,
-        SpinUsed = SpinUsed,
+        Wx = Wx,
+        Wy = Wy,
+        Wz = Wz,
     };
 }

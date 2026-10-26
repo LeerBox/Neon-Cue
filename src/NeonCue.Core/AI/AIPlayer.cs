@@ -102,13 +102,16 @@ public static class AIPlayer
     {
         public Vec2? Placement;
         public double Angle, Power, Side, Top;
+        public int Target = -1;
+        public Vec2 AimPoint;
         public string Plan = "";
         public double Score;
         public double Robust;
         public bool Success;
     }
 
-    sealed record Candidate(double Angle, double Power, double Quality, string Plan);
+    /// <summary>A shot idea; <see cref="Target"/> leaving towards <see cref="AimPoint"/> is the intent (throw is solved later).</summary>
+    sealed record Candidate(double Angle, double Power, double Quality, string Plan, int Target = -1, Vec2 AimPoint = default);
 
     static AIShot ToShot(Trial t) => new()
     {
@@ -132,7 +135,7 @@ public static class AIPlayer
         foreach (var c in cands)
             foreach (var m in prof.PowerMuls)
                 foreach (var (side, top) in prof.Spins)
-                    trials.Add(new Trial { Angle = c.Angle, Power = Math.Clamp(c.Power * m, 0.04, 1), Side = side, Top = top, Plan = c.Plan });
+                    trials.Add(new Trial { Angle = c.Angle, Power = Math.Clamp(c.Power * m, 0.04, 1), Side = side, Top = top, Plan = c.Plan, Target = c.Target, AimPoint = c.AimPoint });
         RunTrials(s, rules, prof, trials);
 
         Trial? best = null;
@@ -218,6 +221,14 @@ public static class AIPlayer
         Parallel.For(0, trials.Count, i =>
         {
             var t = trials[i];
+            // Real balls throw: correct the ghost-ball aim for this exact speed and spin first.
+            if (t.Target > 0)
+            {
+                var c = s;
+                if (t.Placement is Vec2 pl) { c = s.Clone(); c.Cue.Pos = pl; }
+                t.Angle = ShotSolver.RefineAim(c, t.Target, t.AimPoint, t.Angle, t.Power, t.Side, t.Top, s.CurrentPlayer.Cue);
+                t.Target = -1;
+            }
             t.Score = Evaluate(s, rules, prof, t, out t.Success);
         });
     }
@@ -324,14 +335,14 @@ public static class AIPlayer
         return q;
     }
 
-    const double PlanDecel = 200;
-
+    /// <summary>Power for the object ball to reach the pocket with a little to spare (real cloth friction).</summary>
     static double EstimatePower(double d1, double d2, double cosCut)
     {
-        double vObj = Math.Sqrt(2 * PlanDecel * (d2 + 50)) + 40;
+        double vObj = Physics.SpeedToTravel(d2 + 6 * R) * 1.15;
         double vImp = vObj / (Math.Max(cosCut, 0.3) * 0.975);
-        double v0 = Math.Sqrt(vImp * vImp + 2 * PlanDecel * d1);
-        return Math.Clamp(v0 / Physics.MaxShotSpeed, 0.05, 1.0);
+        double vTravel = Physics.SpeedToTravel(d1);
+        double v0 = Math.Sqrt(vImp * vImp + vTravel * vTravel);
+        return Math.Clamp(Physics.PowerForSpeedFraction(v0 / Physics.MaxShotSpeed), 0.04, 1.0);
     }
 
     static List<Candidate> Candidates(GameState s, GameRules rules, AIProfile prof)
@@ -348,7 +359,11 @@ public static class AIPlayer
                 foreach (var p in Table.Pockets)
                 {
                     double q = DirectQuality(s, cue, 0, t, p, out var g, out var cc, out var d1, out var d2);
-                    if (q > 0) list.Add(new Candidate((g - cue).Angle, EstimatePower(d1, d2, cc), q, $"{t.Number} in the {p.Name}"));
+                    if (q > 0)
+                    {
+                        Vec2 aim = Vec2.Distance(t.Pos, p.Aim) < 3 * R ? p.Center : p.Aim;
+                        list.Add(new Candidate((g - cue).Angle, EstimatePower(d1, d2, cc), q, $"{t.Number} in the {p.Name}", t.Number, aim));
+                    }
                     if (prof.Banks) AddBanks(s, cue, t, p, list);
                 }
             }
@@ -381,10 +396,11 @@ public static class AIPlayer
         if (!PathClear(s, cue, g1, 0, t.Number)) return;
 
         double q = qo * cc1 * cc1 * Math.Exp(-l1 / 1500) * 0.6;
-        double vO = Math.Sqrt(2 * PlanDecel * (dO + 50)) + 40;
-        double vT = Math.Sqrt(Math.Pow(vO / (cc2 * 0.975), 2) + 2 * PlanDecel * dT);
-        double v0 = Math.Sqrt(Math.Pow(vT / (cc1 * 0.975), 2) + 2 * PlanDecel * l1);
-        list.Add(new Candidate(cg.Angle, Math.Clamp(v0 / Physics.MaxShotSpeed, 0.05, 1), q, $"Combo {t.Number} → {o.Number} in the {p.Name}"));
+        double vO = Physics.SpeedToTravel(dO + 6 * R) * 1.15;
+        double vT = Math.Sqrt(Math.Pow(vO / (cc2 * 0.975), 2) + Math.Pow(Physics.SpeedToTravel(dT), 2));
+        double v0 = Math.Sqrt(Math.Pow(vT / (cc1 * 0.975), 2) + Math.Pow(Physics.SpeedToTravel(l1), 2));
+        double pw = Math.Clamp(Physics.PowerForSpeedFraction(v0 / Physics.MaxShotSpeed), 0.04, 1);
+        list.Add(new Candidate(cg.Angle, pw, q, $"Combo {t.Number} → {o.Number} in the {p.Name}", t.Number, g2));
     }
 
     static void AddBanks(GameState s, Vec2 cue, Ball t, Pocket p, List<Candidate> list)
@@ -430,7 +446,7 @@ public static class AIPlayer
 
             double dist = k + Vec2.Distance(bounce, p.Aim);
             double q = Math.Pow(cc, 1.6) * Math.Exp(-(d1 * 0.6 + dist) / 1100.0) * 0.45;
-            list.Add(new Candidate(cg.Angle, EstimatePower(d1, dist * 1.3 + 60, cc), q, $"Bank {t.Number} in the {p.Name}"));
+            list.Add(new Candidate(cg.Angle, EstimatePower(d1, dist * 1.3 + 60, cc), q, $"Bank {t.Number} in the {p.Name}", t.Number, m));
         }
     }
 
