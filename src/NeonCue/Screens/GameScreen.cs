@@ -1436,7 +1436,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     void DrawCardChrome(Graphics g, RectangleF rect, Color accent, bool active)
     {
         int pad = (int)Math.Ceiling(16 * u);
-        var key = ((int)rect.Width, (int)rect.Height, accent.ToArgb(), active);
+        var key = (w: (int)rect.Width, h: (int)rect.Height, color: accent.ToArgb(), active);
         if (!cardCache.TryGetValue(key, out var bmp))
         {
             if (cardCache.Count > 16) { foreach (var b in cardCache.Values) b.Dispose(); cardCache.Clear(); }
