@@ -31,6 +31,11 @@ jobs:
           $p = Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--playtest','playtest.txt','40' -Wait -PassThru
           Get-Content playtest.txt
           exit $p.ExitCode
+      - name: Frame benchmark (smoothness)
+        shell: pwsh
+        run: |
+          Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--bench','bench.txt' -Wait
+          Get-Content bench.txt
       - name: Screenshots
         if: always()
         shell: pwsh

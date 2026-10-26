@@ -1616,6 +1616,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal void DebugSetGuide(AimGuide guide) => cfg.Guide = guide;
     internal void DebugSetAssist(AimAssist assist) => cfg.Assist = assist;
     internal void DebugShowStats() => showStats = true;
+    /// <summary>Where ball <paramref name="n"/> is drawn this frame.</summary>
+    internal Vec2 DrawnPos(int n) => state.Balls[n].Pos;
+    internal void DebugBreak()
+    {
+        var apex = state.ObjectBallsOnTable.OrderBy(b => b.Pos.X).First();
+        state.Cue.Pos = new Vec2(Table.HeadStringX - 25, Table.Height / 2 - 20);
+        Shoot((apex.Pos - state.Cue.Pos).Angle, 1.0, 0, 0);
+    }
 
     /// <summary>What the aim guide currently promises: first ball hit and its departure direction.</summary>
     internal (int ball, Vec2 objDir)? PredictedHit()

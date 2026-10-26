@@ -14,6 +14,12 @@ static class Program
             return;
         }
 
+        if (args.Length >= 2 && args[0] == "--bench")
+        {
+            Bench.Run(args[1]);
+            return;
+        }
+
         if (args.Length >= 2 && args[0] == "--playtest")
         {
             bool ok = PlayTest.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 150);
