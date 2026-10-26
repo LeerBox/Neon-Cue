@@ -1332,7 +1332,13 @@ sealed class GameScreen : IScreen, IPhysicsListener
         using var ring = new GraphicsPath();
         float pr = (float)pk.DrawRadius + 3;
         ring.AddEllipse((float)pk.DrawCenter.X - pr, (float)pk.DrawCenter.Y - pr, pr * 2, pr * 2);
-        Gfx.GlowPath(g, ring, color, 2f, 2.5f, 4, 50);
+        if (Look.Realistic)
+        {
+            // Broadcast style: a crisp ring, no glow.
+            using var pen = new Pen(Color.FromArgb(230, Ui.Accent(color)), 2f);
+            g.DrawPath(pen, ring);
+        }
+        else Gfx.GlowPath(g, ring, color, 2f, 2.5f, 4, 50);
     }
 
     void DrawStop(Graphics g, Vec2 at, Color color)
@@ -1736,6 +1742,6 @@ sealed class GameScreen : IScreen, IPhysicsListener
         kbPower = 0.55;
         spinTop = -0.3;
         Say($"Coach: {plan.Plan}", Theme.Lime, 60);
-        fx.Pulse(Table.Pockets[2].DrawCenter, Theme.Lime, 30, 60);
+        fx.Pulse(Table.Pockets[2].DrawCenter, Look.Realistic ? Ui.Good : Theme.Lime, 30, 60);
     }
 }

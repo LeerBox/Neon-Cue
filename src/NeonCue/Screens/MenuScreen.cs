@@ -23,6 +23,9 @@ sealed class MenuScreen : IScreen
     readonly AppSettings cfg;
     readonly List<Row> rows = new();
     readonly List<UiButton> buttons = new();
+    readonly BallRenderer sprites = new();
+    readonly Mat3[] heroOri;
+    static readonly int[] RackOrder = [1, 9, 2, 10, 8, 3, 11, 7, 14, 4, 5, 13, 15, 6, 12];
     int selected = -1;
     int hoverRow = -1;
     bool showHelp;
@@ -35,6 +38,8 @@ sealed class MenuScreen : IScreen
         this.host = host;
         cfg = host.Settings;
         Look.Snooker = false;
+        var seed = new Random(11);
+        heroOri = Enumerable.Range(0, 16).Select(_ => Mat3.RandomResting(seed)).ToArray();
 
         rows.Add(new Row
         {
@@ -143,14 +148,14 @@ sealed class MenuScreen : IScreen
     {
         size = s;
         u = Math.Clamp(Math.Min(s.Width / 1280f, s.Height / 800f), 0.75f, 2.2f);
-        float x = 72 * u, w = 560 * u, h = 40 * u, y = 236 * u;
+        float x = 72 * u, w = 560 * u, h = 38 * u, y = 224 * u;
         for (int i = 0; i < rows.Count; i++)
             rows[i].Rect = new RectangleF(x, y + i * h, w, h);
-        float by = y + rows.Count * h + 54 * u;
+        float by = y + rows.Count * h + 48 * u;
         float bw = (w - 16 * u) / 3;
-        buttons[0].Rect = new RectangleF(x, by, w, 54 * u);
+        buttons[0].Rect = new RectangleF(x, by, w, 50 * u);
         for (int i = 1; i < 4; i++)
-            buttons[i].Rect = new RectangleF(x + (i - 1) * (bw + 8 * u), by + 64 * u, bw, 40 * u);
+            buttons[i].Rect = new RectangleF(x + (i - 1) * (bw + 8 * u), by + 60 * u, bw, 38 * u);
     }
 
     public void Draw(Graphics g, Size s)
@@ -169,6 +174,7 @@ sealed class MenuScreen : IScreen
             g.FillPath(hb, hp);
         }
         Ui.Hairline(g, 0, 64 * u, s.Width, 64 * u);
+        DrawRack(g, s);
 
         float x = 72 * u;
         Ui.Tracked(g, "NEON CUE", Ui.Head(64 * u), Ui.Text, x, 128 * u, 8 * u);
@@ -187,15 +193,41 @@ sealed class MenuScreen : IScreen
         foreach (var b in buttons) b.Draw(g, u);
 
         var cue = cfg.Equipped;
-        Ui.Tracked(g, "COINS", Ui.Head(12 * u), Ui.Text3, s.Width - 260 * u, 32 * u, 2.5f * u);
-        Ui.Write(g, cfg.Coins.ToString("N0"), Ui.Num(20 * u), Ui.Gold, new RectangleF(s.Width - 200 * u, 18 * u, 170 * u, 28 * u), StringAlignment.Far);
-        Ui.Write(g, cue.Name, Ui.BodyStrong(14 * u), CueArt.TierColor(cue.Tier), new RectangleF(s.Width - 460 * u, 18 * u, 180 * u, 28 * u), StringAlignment.Far);
+        // Top bar, right to left: coins, then the equipped cue.
+        float rx = s.Width - 32 * u;
+        string coins = cfg.Coins.ToString("N0");
+        rx -= Ui.TrackedWidth(g, coins, Ui.Num(20 * u), 0.5f * u);
+        Ui.Tracked(g, coins, Ui.Num(20 * u), Ui.Gold, rx, 33 * u, 0.5f * u);
+        rx -= 10 * u;
+        Ui.Tracked(g, "COINS", Ui.Head(11 * u), Ui.Text3, rx, 33 * u, 2.2f * u, StringAlignment.Far);
+        rx -= Ui.TrackedWidth(g, "COINS", Ui.Head(11 * u), 2.2f * u) + 22 * u;
+        Ui.Hairline(g, rx, 22 * u, rx, 44 * u);
+        rx -= 22 * u;
+        Ui.Tracked(g, cue.Name.ToUpperInvariant(), Ui.Head(13 * u), CueArt.TierColor(cue.Tier), rx, 33 * u, 1.8f * u, StringAlignment.Far);
+        rx -= Ui.TrackedWidth(g, cue.Name.ToUpperInvariant(), Ui.Head(13 * u), 1.8f * u) + 10 * u;
+        Ui.Tracked(g, "CUE", Ui.Head(11 * u), Ui.Text3, rx, 33 * u, 2.2f * u, StringAlignment.Far);
 
         Ui.Hairline(g, 0, s.Height - 44 * u, s.Width, s.Height - 44 * u);
         Ui.Tracked(g, "↑↓ SELECT    ←→ CHANGE    ENTER PLAY    C CUE SHOP    F1 HELP", Ui.Head(11 * u), Ui.Text3, x, s.Height - 22 * u, 1.8f * u);
         Ui.Tracked(g, "V1.11", Ui.Head(11 * u), Ui.Text3, s.Width - 24 * u, s.Height - 22 * u, 1.8f * u, StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
+    }
+
+    /// <summary>A racked set of balls under the lamp on the right — the menu's hero image.</summary>
+    void DrawRack(Graphics g, Size s)
+    {
+        float r = 26 * u, gap = 1.04f;
+        float ax = s.Width * 0.70f, ay = s.Height * 0.50f;
+        if (ax - 6 * r < 72 * u + 600 * u) return;
+        var spots = new List<(int n, PointF p)> { (0, new PointF(ax - 7.5f * r, ay)) };
+        int k = 0;
+        for (int row = 0; row < 5; row++)
+            for (int j = 0; j <= row; j++)
+                spots.Add((RackOrder[k++], new PointF(ax + row * 1.732f * r * gap, ay + (j - row / 2f) * 2 * r * gap)));
+        using (var sh = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
+            foreach (var (_, p) in spots) g.FillEllipse(sh, p.X - r * 0.9f, p.Y - r * 0.55f + r * 0.75f, r * 1.9f, r * 0.9f);
+        foreach (var (n, p) in spots) sprites.Draw(g, n, heroOri[n], r, p, 1f);
     }
 
     void DrawRow(Graphics g, Row row, int index)
