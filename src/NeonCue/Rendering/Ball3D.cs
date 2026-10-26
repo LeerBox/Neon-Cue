@@ -85,6 +85,9 @@ sealed class BallRenderer : IDisposable
     static float[]?[]? glyphs;
 
     public const int MaxBalls = 22;
+    /// <summary>Time spent re-rendering ball sprites (benchmark).</summary>
+    public static double RenderMs;
+    public static int Renders;
     readonly Bitmap?[] cache = new Bitmap?[MaxBalls];
     readonly Mat3[] cachedOri = new Mat3[MaxBalls];
     readonly bool[] valid = new bool[MaxBalls];
@@ -113,9 +116,12 @@ sealed class BallRenderer : IDisposable
         int size = (int)Math.Ceiling(r * 2) + 2;
         bmp ??= new Bitmap(size, size, PixelFormat.Format32bppPArgb);
         cache[n] = bmp;
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         var canvas = new PixelCanvas(size, size);
         Render(canvas, n, ori, r);
         canvas.CopyTo(bmp);
+        RenderMs += (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        Renders++;
         cachedOri[n] = ori;
         valid[n] = true;
         return bmp;

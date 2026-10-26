@@ -1128,16 +1128,25 @@ sealed class GameScreen : IScreen, IPhysicsListener
         Theme.Setup(g);
         float top = 100 * u, bottom = 88 * u;
         view.Layout(new RectangleF(14 * u, top, s.Width - 28 * u, s.Height - top - bottom));
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         view.DrawBackground(g, s);
+        long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
 
         var saved = g.Save();
         view.ApplyWorld(g);
         DrawWorld(g);
         g.Restore(saved);
+        long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
 
         DrawHud(g);
         DrawBottomBar(g);
         DrawToasts(g);
+        long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
+        double f = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        Timing.Background += (t1 - t0) * f;
+        Timing.World += (t2 - t1) * f;
+        Timing.Hud += (t3 - t2) * f;
+        Timing.Frames++;
         if (showStats && phase != Phase.RackOver && !paused) DrawScoreboard(g);
         if (phase == Phase.RackOver) DrawRackOver(g);
         else if (paused) DrawPause(g);
@@ -1638,6 +1647,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal void DebugShowStats() => showStats = true;
     /// <summary>Where ball <paramref name="n"/> is drawn this frame.</summary>
     internal Vec2 DrawnPos(int n) => DrawPos(state.Balls[n]);
+
+    /// <summary>Accumulated draw time per section (ms), read by the benchmark.</summary>
+    internal static class Timing
+    {
+        public static double Background, World, Hud;
+        public static int Frames;
+        public static void Reset() { Background = World = Hud = 0; Frames = 0; }
+    }
     internal void DebugBreak()
     {
         var apex = state.ObjectBallsOnTable.OrderBy(b => b.Pos.X).First();

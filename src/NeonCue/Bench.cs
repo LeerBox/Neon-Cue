@@ -37,6 +37,9 @@ static class Bench
         for (int i = 0; i < 5; i++) gs.Draw(g, size); // warm caches
 
         const double dt = 1 / 279.0;
+        GameScreen.Timing.Reset();
+        BallRenderer.RenderMs = 0;
+        BallRenderer.Renders = 0;
         gs.DebugBreak();
         var cost = new List<double>();
         var steps = new List<double>();
@@ -69,6 +72,7 @@ static class Bench
             $"Neon Cue frame benchmark - full-power break, 2560x1440, realistic table, {cost.Count} frames at 279 Hz",
             $"frame cost (update+draw): avg {cost.DefaultIfEmpty().Average():0.00} ms, median {P(0.5):0.00}, p95 {P(0.95):0.00}, max {P(1):0.00}",
             $"achievable frame rate (median): {1000 / Math.Max(0.01, P(0.5)):0} fps",
+            $"per frame: background {GameScreen.Timing.Background / Math.Max(1, GameScreen.Timing.Frames):0.00} ms, table+balls {GameScreen.Timing.World / Math.Max(1, GameScreen.Timing.Frames):0.00} ms (sprite renders {BallRenderer.RenderMs / Math.Max(1, GameScreen.Timing.Frames):0.00} ms, {BallRenderer.Renders / (double)Math.Max(1, GameScreen.Timing.Frames):0.0}/frame), hud {GameScreen.Timing.Hud / Math.Max(1, GameScreen.Timing.Frames):0.00} ms",
             $"motion unevenness (cue ball step-to-step): mean {100 * jitter.DefaultIfEmpty().Average():0.0}%, p95 {100 * Pct(jitter, 0.95):0.0}%",
         };
         File.WriteAllLines(reportPath, lines);
