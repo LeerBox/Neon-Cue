@@ -46,6 +46,7 @@ sealed class MenuScreen : IScreen
     {
         this.host = host;
         cfg = host.Settings;
+        Look.Snooker = false;
 
         rows.Add(new Row
         {
@@ -82,6 +83,7 @@ sealed class MenuScreen : IScreen
                 GameMode.StraightPool => $"First to {cfg.TargetScore}",
                 GameMode.Rotation => "First to 61",
                 GameMode.Practice => "Endless",
+                GameMode.Snooker => cfg.RaceTo == 1 ? "Single frame" : $"Best of {2 * cfg.RaceTo - 1} frames",
                 _ => cfg.RaceTo == 1 ? "Single rack" : $"Race to {cfg.RaceTo}",
             },
             Change = d =>

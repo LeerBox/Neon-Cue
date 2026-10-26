@@ -205,6 +205,11 @@ static class RealTable
 
     static void DrawSpots(Graphics g)
     {
+        if (Table.HasD)
+        {
+            TableView.DrawSnookerMarks(g, Color.FromArgb(120, 240, 240, 230), Color.FromArgb(170, 240, 240, 230));
+            return;
+        }
         using var spot = new SolidBrush(Color.FromArgb(150, 240, 240, 230));
         foreach (var p in new[] { Table.FootSpot, Table.HeadSpot })
             g.FillEllipse(spot, (float)p.X - 2.4f, (float)p.Y - 2.4f, 4.8f, 4.8f);

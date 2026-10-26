@@ -14,7 +14,7 @@ sealed class TableView : IDisposable
     public float OY { get; private set; }
 
     Bitmap? cache;
-    (Size size, float scale, float ox, float oy, TableStyle style) cacheKey;
+    (Size size, float scale, float ox, float oy, TableStyle style, TableKind kind) cacheKey;
 
     public void Layout(RectangleF area)
     {
@@ -38,7 +38,7 @@ sealed class TableView : IDisposable
 
     public void DrawBackground(Graphics g, Size client)
     {
-        var key = (client, Scale, OX, OY, Look.Style);
+        var key = (client, Scale, OX, OY, Look.Style, Table.Kind);
         if (cache == null || cacheKey != key)
         {
             cache?.Dispose();
@@ -135,11 +135,16 @@ sealed class TableView : IDisposable
         using (var wb = new SolidBrush(Color.FromArgb(16, 0, 240, 255)))
             g.DrawString("NEON CUE", wm, wb, new RectangleF(0, 0, W, H), sf);
 
-        // Head string and spots.
-        using (var hs = new Pen(Color.FromArgb(55, 0, 240, 255), 1.2f) { DashStyle = DashStyle.Dash })
-            g.DrawLine(hs, (float)Table.HeadStringX, 0, (float)Table.HeadStringX, H);
-        using (var spot = new SolidBrush(Color.FromArgb(120, 0, 240, 255)))
+        // Head string and spots (pool), or baulk line, D and colour spots (snooker).
+        if (Table.HasD)
         {
+            DrawSnookerMarks(g, Color.FromArgb(90, 0, 240, 255), Color.FromArgb(140, 0, 240, 255));
+        }
+        else
+        {
+            using (var hs = new Pen(Color.FromArgb(55, 0, 240, 255), 1.2f) { DashStyle = DashStyle.Dash })
+                g.DrawLine(hs, (float)Table.HeadStringX, 0, (float)Table.HeadStringX, H);
+            using var spot = new SolidBrush(Color.FromArgb(120, 0, 240, 255));
             foreach (var p in new[] { Table.FootSpot, Table.HeadSpot, Table.CenterSpot })
                 g.FillEllipse(spot, (float)p.X - 2.2f, (float)p.Y - 2.2f, 4.4f, 4.4f);
         }
@@ -189,6 +194,22 @@ sealed class TableView : IDisposable
         {
             Diamond(-dOff, H * k / 4f);
             Diamond(W + dOff, H * k / 4f);
+        }
+    }
+
+
+    /// <summary>Snooker markings: baulk line, the D and the six colour spots.</summary>
+    public static void DrawSnookerMarks(Graphics g, Color line, Color spot)
+    {
+        float bx = (float)Table.BaulkX, dr = (float)Table.DRadius, cy = (float)(Table.Height / 2);
+        using var pen = new Pen(line, 1.1f);
+        g.DrawLine(pen, bx, 0, bx, (float)Table.Height);
+        g.DrawArc(pen, bx - dr, cy - dr, dr * 2, dr * 2, 90, 180);
+        using var sb = new SolidBrush(spot);
+        for (int c = SnookerRules.Yellow; c <= SnookerRules.Black; c++)
+        {
+            var p = SnookerRules.Spot(c);
+            g.FillEllipse(sb, (float)p.X - 1.8f, (float)p.Y - 1.8f, 3.6f, 3.6f);
         }
     }
 

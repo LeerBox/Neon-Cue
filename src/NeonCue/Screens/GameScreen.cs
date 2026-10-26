@@ -23,7 +23,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         public double T;
     }
 
-    const double R = Table.R;
+    static double R => Table.R;
 
     readonly IHost host;
     readonly AppSettings cfg;
@@ -33,8 +33,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
     readonly Particles fx = new();
     readonly BallRenderer balls3d = new();
     readonly BallRenderer hudBalls = new();
-    readonly Mat3[] orient = new Mat3[16];
-    readonly Vec2[] lastPos = new Vec2[16];
+    readonly Mat3[] orient = new Mat3[BallRenderer.MaxBalls];
+    readonly Vec2[] lastPos = new Vec2[BallRenderer.MaxBalls];
     Bitmap? shadowSprite;
     float shadowRadius;
     int rollUpdates;
@@ -67,6 +67,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         this.host = host;
         cfg = host.Settings;
         rules = GameRules.Create(cfg.Mode);
+        Look.Snooker = rules.Mode == GameMode.Snooker;
         state = NewMatch(0);
         for (int i = 0; i < orient.Length; i++) orient[i] = Mat3.RandomResting(rng);
         SyncRolling();
@@ -123,8 +124,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     bool HumanTurn => !state.CurrentPlayer.IsAI && !state.RackOver;
-    const double AimFreezeRadius = 1.6 * R;   // over the cue ball itself
-    const double GripRadius = 3 * R;          // pressing this close to the cue ball = pulling back from it
+    static double AimFreezeRadius => 1.6 * R;   // over the cue ball itself
+    static double GripRadius => 3 * R;          // pressing this close to the cue ball = pulling back from it
     double rawAim = Math.PI;
     Vec2 lastMouseWorld;
     double lastMoveTime;
@@ -143,7 +144,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     int previewVersion;
     (double aim, double side, double top, Vec2 cue, int shot) previewKey;
     bool aimDwellPending;
-    const double TrustedAimDist = 10 * R;     // aims set this far out are deliberate, never reach noise
+    static double TrustedAimDist => 10 * R;     // aims set this far out are deliberate, never reach noise
     double trustedAim = Math.PI, trustedAimTime = -1, lastNearAimTime = -1;
     double radialTrend, tangTrend;
     bool pressedOnCue;
@@ -172,6 +173,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         spinSide = spinTop = 0;
         var p = state.CurrentPlayer;
+        if (p.IsAI && rules.ShouldConcede(state, state.Current))
+        {
+            Say($"{p.Name} concedes the frame", Theme.Amber, 3);
+            rules.ConcedeFrame(state, state.Current);
+            host.Sound.Win();
+            BeginTurn();
+            return;
+        }
         if (p.IsAI)
         {
             phase = Phase.AIThinking;
@@ -677,6 +686,17 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     void MoveCueTo(Vec2 w)
     {
+        if (state.KitchenOnly && Table.HasD)
+        {
+            // Keep the cue ball inside the D: behind the baulk line, within the semicircle.
+            Vec2 v = w - Table.DCenter;
+            if (v.X > 0) v = new Vec2(0, v.Y);
+            double max = Table.DRadius - 0.5;
+            if (v.Length > max) v = v.Normalized() * max;
+            var d = Table.DCenter + v;
+            if (state.IsValidCuePlacement(d)) state.Cue.Pos = d;
+            return;
+        }
         double maxX = state.KitchenOnly ? Table.HeadStringX : Table.Width - R;
         var p = new Vec2(Math.Clamp(w.X, R, maxX), Math.Clamp(w.Y, R, Table.Height - R));
         if (state.IsValidCuePlacement(p)) state.Cue.Pos = p;
@@ -875,8 +895,16 @@ sealed class GameScreen : IScreen, IPhysicsListener
         if (phase == Phase.Placing && state.KitchenOnly && HumanTurn)
         {
             using var kb = new SolidBrush(Color.FromArgb(22, 0, 240, 255));
-            g.FillRectangle(kb, 0, 0, (float)Table.HeadStringX, (float)Table.Height);
-            Gfx.GlowLine(g, new PointF((float)Table.HeadStringX, 0), new PointF((float)Table.HeadStringX, (float)Table.Height), Theme.Cyan, 1.2f, 2, 3, 30);
+            if (Table.HasD)
+            {
+                float dr = (float)Table.DRadius;
+                g.FillPie(kb, (float)Table.DCenter.X - dr, (float)Table.DCenter.Y - dr, dr * 2, dr * 2, 90, 180);
+            }
+            else
+            {
+                g.FillRectangle(kb, 0, 0, (float)Table.HeadStringX, (float)Table.Height);
+                Gfx.GlowLine(g, new PointF((float)Table.HeadStringX, 0), new PointF((float)Table.HeadStringX, (float)Table.Height), Theme.Cyan, 1.2f, 2, 3, 30);
+            }
         }
 
         if (humanAim && cfg.Guide != AimGuide.Off) DrawAimGuide(g);

@@ -37,7 +37,7 @@ public sealed record AIProfile(
 /// </summary>
 public static class AIPlayer
 {
-    const double R = Table.R;
+    static double R => Table.R;
     const double WinScore = 12000;
     const double ContinueScore = 3000;
     const double FoulScore = -4000;
@@ -67,6 +67,8 @@ public static class AIPlayer
     {
         var prof = ProfileFor(level);
         var rng = new Random(seed);
+        // Snooker break-off is a safety from the D, not a power break.
+        if (s.IsBreakShot && rules.Mode == GameMode.Snooker) return PlanBallInHand(s, rules, prof, rng);
         if (s.IsBreakShot) return PlanBreak(s, rules, prof, level, rng);
         if (s.BallInHand) return PlanBallInHand(s, rules, prof, rng);
         return PlanShot(s, rules, prof, rng, allowSafety: true);
@@ -228,11 +230,14 @@ public static class AIPlayer
         if (t.Placement is Vec2 pl) c.Cue.Pos = pl;
         c.BallInHand = false;
         int scoreBefore = c.Players[me].Score;
+        int oppBefore = c.Players[c.PlayerCount > 1 ? 1 - me : me].Score;
         Physics.Strike(c.Cue, t.Angle, t.Power, t.Side, t.Top, c.Players[me].Cue, c.IsBreakShot);
         var ev = Physics.Simulate(c.Balls);
         var o = rules.ApplyShot(c, ev, new Random(7));
         bool potted = ev.PocketedObjects.Any();
-        double pts = rules.IsPointsGame ? (c.Players[me].Score - scoreBefore) * 60 : 0;
+        // Points games: value the swing (my points minus what a foul hands the opponent).
+        int oppGain = c.PlayerCount > 1 ? c.Players[1 - me].Score - oppBefore : 0;
+        double pts = rules.IsPointsGame ? (c.Players[me].Score - scoreBefore - oppGain) * 60 : 0;
 
         if (o.RackOver)
         {
@@ -277,7 +282,7 @@ public static class AIPlayer
 
     static bool PathClear(GameState s, Vec2 a, Vec2 b, int ex1, int ex2)
     {
-        const double clearance = 2 * R * 0.98;
+        double clearance = 2 * R * 0.98;
         foreach (var o in s.Balls)
         {
             if (o.Pocketed || o.Number == ex1 || o.Number == ex2) continue;
@@ -502,10 +507,19 @@ public static class AIPlayer
         if (chosen.Count == 0)
         {
             // Nothing pottable: pick the spot that gives the best safety chances later.
-            for (int i = 0; i < 200 && chosen.Count < 3; i++)
+            for (int i = 0; i < 400 && chosen.Count < 4; i++)
             {
-                double maxX = s.KitchenOnly ? Table.HeadStringX : Table.Width - R;
-                var pos = new Vec2(R + rng.NextDouble() * (maxX - R), R + rng.NextDouble() * (Table.Height - 2 * R));
+                Vec2 pos;
+                if (s.KitchenOnly && Table.HasD)
+                {
+                    double a = Math.PI / 2 + rng.NextDouble() * Math.PI, rad = Math.Sqrt(rng.NextDouble()) * Table.DRadius;
+                    pos = Table.DCenter + Vec2.FromAngle(a) * rad;
+                }
+                else
+                {
+                    double maxX = s.KitchenOnly ? Table.HeadStringX : Table.Width - R;
+                    pos = new Vec2(R + rng.NextDouble() * (maxX - R), R + rng.NextDouble() * (Table.Height - 2 * R));
+                }
                 if (s.IsValidCuePlacement(pos)) chosen.Add(pos);
             }
             if (chosen.Count == 0) chosen.Add(s.FindFreeSpot(Table.HeadSpot, 0));

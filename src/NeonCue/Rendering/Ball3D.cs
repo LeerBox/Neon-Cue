@@ -84,9 +84,11 @@ sealed class BallRenderer : IDisposable
     const int GlyphSize = 64;
     static float[]?[]? glyphs;
 
-    readonly Bitmap?[] cache = new Bitmap?[16];
-    readonly Mat3[] cachedOri = new Mat3[16];
-    readonly bool[] valid = new bool[16];
+    public const int MaxBalls = 22;
+    readonly Bitmap?[] cache = new Bitmap?[MaxBalls];
+    readonly Mat3[] cachedOri = new Mat3[MaxBalls];
+    readonly bool[] valid = new bool[MaxBalls];
+    bool snooker;
     float radius = -1;
     TableStyle style;
 
@@ -98,11 +100,12 @@ sealed class BallRenderer : IDisposable
 
     public Bitmap Get(int n, Mat3 ori, float r)
     {
-        if (Math.Abs(r - radius) > 0.01f || style != Look.Style)
+        if (Math.Abs(r - radius) > 0.01f || style != Look.Style || snooker != Look.Snooker)
         {
             Dispose();
             radius = r;
             style = Look.Style;
+            snooker = Look.Snooker;
         }
         var bmp = cache[n];
         if (bmp != null && valid[n] && cachedOri[n].NearlyEquals(ori)) return bmp;
@@ -173,6 +176,7 @@ sealed class BallRenderer : IDisposable
 
     static Rgb Surface(int n, Vec3 p)
     {
+        if (Look.Snooker && n > 0) return Look.SnookerColor(n); // plain, unnumbered snooker balls
         if (n == 0)
         {
             // Two small red dots so you can see the cue ball spin.

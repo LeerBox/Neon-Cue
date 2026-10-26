@@ -115,6 +115,7 @@ public static class CueCatalog
         GameMode.StraightPool => (0.6, 1.0, 1.6, 1.1, 1.2),
         GameMode.Rotation => (1.0, 1.2, 1.4, 1.0, 1.0),
         GameMode.Practice => (0.8, 1.3, 1.2, 1.0, 1.3),
+        GameMode.Snooker => (0.5, 1.2, 1.7, 1.3, 1.2),
         _ => (1.0, 1.0, 1.4, 1.0, 1.0),
     };
 

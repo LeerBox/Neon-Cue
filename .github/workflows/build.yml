@@ -17,6 +17,10 @@ jobs:
         run: dotnet build NeonCue.sln -c Release
       - name: AI / physics simulation
         run: dotnet run --project tests/NeonCue.Sim -c Release --no-build -- 1 all all
+      - name: Snooker frame, shot by shot (Pro vs Pro)
+        env:
+          SIM_VERBOSE: "1"
+        run: dotnet run --project tests/NeonCue.Sim -c Release --no-build -- 1 Pro Snooker
       - name: Audio mixer check (no dropped or clipped sounds)
         run: dotnet run --project tests/NeonCue.AudioCheck -c Release --no-build -- audiocheck.wav
       - name: Automated play-test (mouse input -> shot accuracy)
@@ -25,3 +29,16 @@ jobs:
           $p = Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--playtest','playtest.txt','40' -Wait -PassThru
           Get-Content playtest.txt
           exit $p.ExitCode
+      - name: Screenshots
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force shots | Out-Null
+          foreach ($m in 'snooker','watchsnooker','game','menu') {
+            Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--render',"shots/$m.png",$m -Wait
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots/

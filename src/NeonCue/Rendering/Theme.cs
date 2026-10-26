@@ -33,7 +33,15 @@ static class Theme
         Hex("#FF7B1C"), Hex("#16B864"), Hex("#A0202A"), Hex("#121214"),
     ];
 
-    public static Color BallColor(int n) => n <= 8 ? BallColors[n] : BallColors[n - 8];
+    public static Color BallColor(int n)
+    {
+        if (Look.Snooker || n > 15)
+        {
+            var c = Look.SnookerColor(n);
+            return Color.FromArgb((int)(c.R * 255), (int)(c.G * 255), (int)(c.B * 255));
+        }
+        return n <= 8 ? BallColors[n] : BallColors[n - 8];
+    }
 
     public static Color Hex(string hex)
     {

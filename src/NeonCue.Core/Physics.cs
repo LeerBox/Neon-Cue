@@ -37,9 +37,9 @@ public static class Physics
     public const double StopSpeed = 2.0;
     public const double MaxSimTime = 45;
 
-    const double R = Table.R;
-    const double TwoR = 2 * R;
-    const double FourR2 = 4 * R * R;
+    static double R => Table.R;
+    static double TwoR => 2 * Table.R;
+    static double FourR2 => 4 * Table.R * Table.R;
 
     public static void Strike(Ball cue, double angle, double power, double spinSide, double spinTop, CueSpec? stick = null, bool isBreak = false)
     {
@@ -92,7 +92,7 @@ public static class Physics
                 b.SpinTop = 0;
                 b.SpinSide = 0;
                 // A ball that dies with most of itself over a pocket opening falls in.
-                const double lip = 0.6 * R;
+                double lip = 0.6 * R;
                 if (b.Pos.X < lip || b.Pos.X > Table.Width - lip || b.Pos.Y < lip || b.Pos.Y > Table.Height - lip)
                     Drop(b, Table.NearestPocket(b.Pos), ev, listener);
                 continue;
@@ -164,7 +164,7 @@ public static class Physics
     static bool CheckPocket(Ball b, ShotEvents ev, IPhysicsListener? listener)
     {
         double x = b.Pos.X, y = b.Pos.Y;
-        const double m = 0.6 * R;
+        double m = 0.6 * R;
         Pocket? hit = null;
         if (x < -m || x > Table.Width + m || y < -m || y > Table.Height + m)
         {

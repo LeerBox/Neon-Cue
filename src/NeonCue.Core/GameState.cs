@@ -1,6 +1,6 @@
 namespace NeonCue.Core;
 
-public enum GameMode { EightBall, NineBall, TenBall, StraightPool, Rotation, Practice }
+public enum GameMode { EightBall, NineBall, TenBall, StraightPool, Rotation, Practice, Snooker }
 public enum Group { None, Solids, Stripes }
 public enum AILevel { Rookie, Amateur, Pro, Master }
 public enum OpponentType { Cpu, TwoPlayer, CpuVsCpu }
@@ -18,6 +18,7 @@ public sealed class PlayerState
     public int ConsecutiveFouls;
     public int Shots;
     public int Pots;
+    public int HighBreak;
 
     public PlayerState Clone() => (PlayerState)MemberwiseClone();
 }
@@ -41,6 +42,10 @@ public sealed class GameState
     public int Breaker;
     public int RackNumber = 1;
     public int ShotNumber;
+    /// <summary>Snooker: a red was just potted, so the next ball on is a colour.</summary>
+    public bool OnColour;
+    /// <summary>Snooker: points in the current visit.</summary>
+    public int CurrentBreak;
 
     public Ball Cue => Balls[0];
     public int PlayerCount => Players.Length;
@@ -68,9 +73,9 @@ public sealed class GameState
 
     public bool IsValidCuePlacement(Vec2 p)
     {
-        const double R = Table.R;
+        double R = Table.R;
         if (!Table.InsidePlayArea(p)) return false;
-        if (KitchenOnly && p.X > Table.HeadStringX) return false;
+        if (KitchenOnly && !Table.InKitchen(p)) return false;
         double min = (2 * R + 0.5) * (2 * R + 0.5);
         for (int i = 1; i < Balls.Length; i++)
         {
@@ -83,7 +88,7 @@ public sealed class GameState
     /// <summary>Nearest free spot to <paramref name="preferred"/>, searching along the long axis first.</summary>
     public Vec2 FindFreeSpot(Vec2 preferred, int self = -1)
     {
-        const double R = Table.R;
+        double R = Table.R;
         bool Free(Vec2 p)
         {
             if (!Table.InsidePlayArea(p)) return false;

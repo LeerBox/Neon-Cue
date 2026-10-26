@@ -8,6 +8,22 @@ static class Look
     public static TableStyle Style { get; set; } = TableStyle.Classic;
     public static bool Realistic => Style != TableStyle.Neon;
 
+    /// <summary>True while a snooker frame is on screen: plain balls, snooker colours.</summary>
+    public static bool Snooker { get; set; }
+
+    /// <summary>Snooker set: 1-15 reds, 16 yellow, 17 green, 18 brown, 19 blue, 20 pink, 21 black.</summary>
+    public static Rgb SnookerColor(int n) => n switch
+    {
+        0 => Rgb.Hex("#F6F3EA"),
+        <= 15 => Rgb.Hex("#C8102E"),
+        16 => Rgb.Hex("#F3C300"),
+        17 => Rgb.Hex("#0B7A3E"),
+        18 => Rgb.Hex("#6E3B1F"),
+        19 => Rgb.Hex("#1546B5"),
+        20 => Rgb.Hex("#F49AC1"),
+        _ => Rgb.Hex("#0B0B0C"),
+    };
+
     public static string Name(TableStyle s) => s switch
     {
         TableStyle.Classic => "Classic green",

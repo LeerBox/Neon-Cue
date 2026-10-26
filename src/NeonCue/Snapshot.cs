@@ -34,10 +34,12 @@ static class Snapshot
         {
             // Drives a full CPU-vs-CPU match through the real game screen (smoke test of the turn flow).
             host.Settings.Opponent = OpponentType.CpuVsCpu;
-            host.Settings.Mode = what == "watch9" ? GameMode.NineBall : GameMode.EightBall;
+            host.Settings.Mode = what switch { "watch9" => GameMode.NineBall, "watchsnooker" => GameMode.Snooker, _ => GameMode.EightBall };
             host.Settings.RaceTo = 2;
             screen = new GameScreen(host);
-            for (int frame = 0; frame < 60 * 240; frame++)
+            // Snooker: stop mid-frame so the screenshot shows a live position.
+            int frames = what == "watchsnooker" ? 60 * 70 : 60 * 240;
+            for (int frame = 0; frame < frames; frame++)
             {
                 screen.Update(1 / 60.0);
                 if (frame % 30 == 0) { screen.Draw(g, bmp.Size); Thread.Sleep(2); }
@@ -50,6 +52,11 @@ static class Snapshot
             host.Settings.EquippedCue = "phantom";
             screen = new ShopScreen(host);
             screen.KeyDown(Keys.Down);
+        }
+        else if (what == "snooker")
+        {
+            host.Settings.Mode = GameMode.Snooker;
+            screen = new GameScreen(host);
         }
         else screen = new MenuScreen(host);
 

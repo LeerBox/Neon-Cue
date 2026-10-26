@@ -93,7 +93,7 @@ static class PlayTest
 
     static void Trial(Row row, Random rng, Tally t)
     {
-        const double R = Table.R;
+        double R = Table.R;
         var host = new Host();
         host.Settings.OwnedCues = [row.Cue];
         host.Settings.EquippedCue = row.Cue;

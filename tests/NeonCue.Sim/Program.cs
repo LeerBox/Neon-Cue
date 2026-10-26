@@ -88,6 +88,13 @@ static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, i
     int shots = 0;
     while (!s.RackOver && shots < maxShots)
     {
+        if (rules.ShouldConcede(s, s.Current))
+        {
+            if (Environment.GetEnvironmentVariable("SIM_VERBOSE") == "1")
+                Console.WriteLine($"  [{mode}] {s.CurrentPlayer.Name} concedes at {s.Players[0].Score}-{s.Players[1].Score}");
+            rules.ConcedeFrame(s, s.Current);
+            break;
+        }
         var sw = Stopwatch.StartNew();
         var lvl = s.CurrentPlayer.Level;
         var shot = AIPlayer.Plan(s, rules, lvl, rng.Next());
@@ -122,7 +129,7 @@ static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, i
         {
             if (b.Pocketed) continue;
             // Balls may hang in a pocket's jaws, but never more than 0.4R past the cushion nose.
-            const double lip = 0.6 * Table.R - 0.01;
+            double lip = 0.6 * Table.R - 0.01;
             if (b.Pos.X < lip || b.Pos.X > Table.Width - lip || b.Pos.Y < lip || b.Pos.Y > Table.Height - lip)
             {
                 Console.WriteLine($"  anomaly: ball {b.Number} resting off the playfield at {b.Pos}");
@@ -141,7 +148,7 @@ static int PlayRack(GameMode mode, AILevel l0, AILevel l1, int seed, Stats st, i
                 }
             }
         if (Environment.GetEnvironmentVariable("SIM_VERBOSE") == "1")
-            Console.WriteLine($"  [{mode}] {s.Players[shooter].Name}: {shot.Plan} p={shot.Power:0.00} -> pots[{string.Join(",", ev.PocketedObjects)}] {(o.Foul ? "FOUL " + o.FoulReason : "")}");
+            Console.WriteLine($"  [{mode}] {s.Players[shooter].Name}: {shot.Plan} p={shot.Power:0.00} -> pots[{string.Join(",", ev.PocketedObjects)}] {(o.Foul ? "FOUL " + o.FoulReason : "")} score {s.Players[0].Score}-{(s.PlayerCount > 1 ? s.Players[1].Score : 0)}");
     }
     if (!s.RackOver && !rules.IsSolo) st.Unfinished++;
     return s.RackWinner;

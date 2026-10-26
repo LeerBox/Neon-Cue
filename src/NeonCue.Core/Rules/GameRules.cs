@@ -18,7 +18,7 @@ public sealed class ShotOutcome
 /// <summary>Base class for every game mode: racking, legality, judging a shot and passing the turn.</summary>
 public abstract class GameRules
 {
-    protected const double R = Table.R;
+    protected static double R => Table.R;
 
     public abstract GameMode Mode { get; }
     public abstract string Name { get; }
@@ -30,6 +30,9 @@ public abstract class GameRules
     public virtual bool ThreeFoulRule => false;
     public virtual bool RequireLegalFirstContactOnBreak => false;
     public virtual bool IsSolo => false;
+    public virtual TableKind TableKind => TableKind.Pool;
+    /// <summary>Whether a foul hands the opponent ball in hand (snooker: only after an in-off).</summary>
+    protected virtual bool FoulGivesBallInHand => true;
 
     public static GameRules Create(GameMode mode) => mode switch
     {
@@ -39,6 +42,7 @@ public abstract class GameRules
         GameMode.StraightPool => new StraightPoolRules(),
         GameMode.Rotation => new Rotation61Rules(),
         GameMode.Practice => new PracticeRules(),
+        GameMode.Snooker => new SnookerRules(),
         _ => throw new ArgumentOutOfRangeException(nameof(mode)),
     };
 
@@ -46,6 +50,7 @@ public abstract class GameRules
 
     public void NewRack(GameState s, Random rng)
     {
+        Table.Use(TableKind);
         s.Balls = new Ball[BallCount + 1];
         for (int i = 0; i <= BallCount; i++) s.Balls[i] = new Ball(i, Vec2.Zero) { Pocketed = i != 0 };
         s.Cue.Pos = Table.HeadSpot;
@@ -62,6 +67,24 @@ public abstract class GameRules
             p.Group = Group.None;
             p.ConsecutiveFouls = 0;
         }
+        OnNewRack(s);
+    }
+
+    /// <summary>Per-mode reset at the start of every rack/frame.</summary>
+    protected virtual void OnNewRack(GameState s) { }
+
+    /// <summary>Whether a player should give up the current frame (snooker: needs impossible snookers).</summary>
+    public virtual bool ShouldConcede(GameState s, int player) => false;
+
+    /// <summary>Ends the rack with <paramref name="loser"/> conceding it.</summary>
+    public void ConcedeFrame(GameState s, int loser)
+    {
+        int winner = s.PlayerCount > 1 ? 1 - loser : loser;
+        s.RackOver = true;
+        s.RackWinner = winner;
+        s.Players[winner].RacksWon++;
+        s.MatchOver = !UsesRaceTo || s.Players[winner].RacksWon >= s.RaceTo;
+        s.BallInHand = false;
     }
 
     public void StartNextRack(GameState s, Random rng)
@@ -116,7 +139,7 @@ public abstract class GameRules
         b.Pocketed = false;
     }
 
-    protected static void Respot(GameState s, int number)
+    protected virtual void Respot(GameState s, int number)
     {
         var b = s.Balls[number];
         b.Pocketed = false;
@@ -199,7 +222,7 @@ public abstract class GameRules
         }
 
         if (!o.TurnContinues && s.PlayerCount > 1) s.Current = s.Opponent;
-        s.BallInHand = o.Foul || o.ForceBallInHand;
+        s.BallInHand = (o.Foul && FoulGivesBallInHand) || o.ForceBallInHand;
         s.KitchenOnly = s.BallInHand && (o.ForceKitchen || (wasBreak && BreakScratchToKitchen && ev.CueScratched));
         return o;
     }
