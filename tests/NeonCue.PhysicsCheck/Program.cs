@@ -49,10 +49,10 @@ Vec2 Mid = new(Table.Width / 2, Table.Height / 2);
 }
 
 // 3. Draw and follow on a straight-in shot: how far the cue ball travels back / on after contact.
-(double back, double on) AfterContact(double top)
+(double back, double on) AfterContact(double top, double gap = 60)
 {
     var c = Cue(new Vec2(300, 250));
-    var o = Obj(1, new Vec2(300 + 2 * R + 60, 250));
+    var o = Obj(1, new Vec2(300 + 2 * R + gap, 250));
     Physics.Strike(c, 0, 0.3, 0, top);
     var balls = new[] { c, o };
     var ev = new ShotEvents();
@@ -63,7 +63,7 @@ Vec2 Mid = new(Table.Width / 2, Table.Height / 2);
 }
 var drawn = AfterContact(-1);
 var followed = AfterContact(1);
-var stunned = AfterContact(0);
+var stunned = AfterContact(0, gap: 8); // still sliding with no spin at impact
 Check("Draw (bottom spin): cue ball comes back (units)", drawn.back, 40, 2000, "units");
 Check("Follow (top spin): cue ball runs through (units)", followed.on, 40, 2000, "units");
 Check("Stun (centre ball, sliding): cue ball stays near contact (units)", Math.Max(stunned.back, stunned.on), 0, 15, "units");

@@ -204,6 +204,15 @@ public abstract class GameRules
             shooter.Pots += ev.PocketedObjects.Count();
         }
 
+        // Visit statistics for the scoreboard.
+        int pottedNow = ev.PocketedObjects.Count();
+        if (!o.Foul && pottedNow > 0 && (o.TurnContinues || o.RackOver))
+        {
+            s.Run += pottedNow;
+            shooter.BestRun = Math.Max(shooter.BestRun, s.Run);
+        }
+        if (o.Foul || !o.TurnContinues || o.RackOver) s.Run = 0;
+
         if (!o.RackOver && o.Foul && ThreeFoulRule && shooter.ConsecutiveFouls >= 3 && s.PlayerCount > 1)
         {
             o.RackOver = true;

@@ -74,7 +74,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
         BeginTurn();
     }
 
-    /// <summary>Rolls each ball's 3D orientation by the distance it moved since last frame.</summary>
+    /// <summary>
+    /// Rolls each ball's 3D orientation by the distance it moved since last frame (used for moves
+    /// outside the physics, like dragging the cue ball in hand; during a shot the real spin drives it).
+    /// </summary>
     void SyncRolling()
     {
         bool tidy = ++rollUpdates % 120 == 0;
@@ -83,7 +86,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             int n = b.Number;
             Vec2 d = b.Pos - lastPos[n];
             double len = d.Length;
-            if (!b.Pocketed && len > 1e-6 && len < 3 * R)
+            if (phase != Phase.Rolling && !b.Pocketed && len > 1e-6 && len < 3 * R)
             {
                 var axis = new Vec3(-d.Y / len, d.X / len, 0);
                 orient[n] = Mat3.Rotation(axis, len / R) * orient[n];
@@ -250,7 +253,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
     void FinishShot()
     {
         int shooter = state.Current;
+        string shooterName = state.CurrentPlayer.Name;
+        int runBefore = state.Run, breakBefore = state.CurrentBreak;
         var o = rules.ApplyShot(state, events, rng);
+        LogShot(shooterName, o, runBefore + events.PocketedObjects.Count(), breakBefore + o.PointsScored);
         int coins = Rewards(shooter, o);
         foreach (var m in o.Messages)
         {
@@ -380,6 +386,23 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
     }
 
+    /// <summary>
+    /// Turns each ball by its true angular velocity, so a drawn ball visibly spins backwards while it
+    /// slides forwards, and side spin turns the numbers around the vertical.
+    /// </summary>
+    void ApplySpin(double dt)
+    {
+        foreach (var b in state.Balls)
+        {
+            if (b.Pocketed) continue;
+            // Physics frame has z down into the cloth; the renderer's z points up at the viewer.
+            double wx = -b.Wx, wy = -b.Wy, wz = b.Wz;
+            double w = Math.Sqrt(wx * wx + wy * wy + wz * wz);
+            if (w < 1e-6) continue;
+            orient[b.Number] = Mat3.Rotation(new Vec3(wx / w, wy / w, wz / w), w * dt) * orient[b.Number];
+        }
+    }
+
     void UpdateRolling(double dt)
     {
         physicsAcc += dt * (fastForward ? 4 : 1);
@@ -390,10 +413,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
             physicsAcc -= Physics.Dt;
             rollTime += Physics.Dt;
             if (!Physics.Step(state.Balls, events, this)) { moving = false; break; }
+            ApplySpin(Physics.Dt);
         }
         if (rollTime > Physics.MaxSimTime)
         {
-            foreach (var b in state.Balls) b.Vel = Vec2.Zero;
+            foreach (var b in state.Balls) b.Stop();
             moving = false;
         }
         if (!moving) FinishShot();
@@ -922,6 +946,9 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 fastForward = !fastForward;
                 Say(fastForward ? "Fast forward ON" : "Fast forward off", Theme.Cyan, 1.2);
                 return true;
+            case Keys.Tab:
+                showStats = !showStats;
+                return true;
             case Keys.M:
                 cfg.Sound = !cfg.Sound;
                 host.Sound.Enabled = cfg.Sound;
@@ -937,6 +964,131 @@ sealed class GameScreen : IScreen, IPhysicsListener
         buttons.Add(new UiButton { Text = "RESUME", Primary = true, OnClick = () => paused = false });
         buttons.Add(new UiButton { Text = "RESTART MATCH", OnClick = Restart });
         buttons.Add(new UiButton { Text = "MAIN MENU", Accent = Theme.Magenta, OnClick = host.ShowMenu });
+    }
+
+    readonly List<string> eventLog = new();
+    bool showStats;
+
+    /// <summary>Thin live win-chance bar under the match title.</summary>
+    void DrawWinBar(Graphics g, float cx, float y)
+    {
+        if (state.PlayerCount < 2) return;
+        double p = WinOdds.Match(state, rules, 0);
+        float w = 230 * u, hh = 5 * u, x = cx - w / 2;
+        using (var bg = new SolidBrush(Theme.A(Theme.Magenta, 200))) g.FillRectangle(bg, x, y, w, hh);
+        using (var fg = new SolidBrush(Theme.A(Theme.Cyan, 230))) g.FillRectangle(fg, x, y, (float)(w * p), hh);
+        var f = Theme.F(11 * u, FontStyle.Bold);
+        Gfx.Text(g, $"{p * 100:0}%", f, Theme.Cyan, new RectangleF(x - 46 * u, y - 7 * u, 42 * u, 18 * u), StringAlignment.Far);
+        Gfx.Text(g, $"{(1 - p) * 100:0}%", f, Theme.Magenta, new RectangleF(x + w + 4 * u, y - 7 * u, 42 * u, 18 * u));
+    }
+
+    /// <summary>Tab overlay: full match statistics, live odds and the story of the match so far.</summary>
+    void DrawScoreboard(Graphics g)
+    {
+        using (var dim = new SolidBrush(Color.FromArgb(150, 4, 3, 10))) g.FillRectangle(dim, new Rectangle(Point.Empty, size));
+        float cx = size.Width / 2f, pw = 760 * u, ph = 470 * u;
+        var r = new RectangleF(cx - pw / 2, size.Height / 2f - ph / 2, pw, ph);
+        using (var path = Gfx.RoundRect(r, 20 * u))
+        {
+            using var br = new SolidBrush(Theme.A(Theme.Panel, 246));
+            g.FillPath(br, path);
+            Gfx.GlowPath(g, path, Theme.Cyan, 1.4f * u, 3 * u, 4, 26);
+        }
+        Gfx.GlowText(g, "SCOREBOARD", Theme.F(28 * u, FontStyle.Bold), Theme.Cyan, Color.White, new PointF(cx, r.Y + 34 * u), spread: 3 * u, layers: 3);
+        Gfx.Text(g, $"{rules.Name.ToUpperInvariant()}  •  {(rules.Mode == GameMode.Snooker ? "FRAME" : "RACK")} {state.RackNumber}",
+            Theme.F(13 * u, FontStyle.Bold), Theme.TextDim, new RectangleF(r.X, r.Y + 54 * u, r.Width, 20 * u), StringAlignment.Center);
+
+        bool snooker = rules.Mode == GameMode.Snooker, points = rules.IsPointsGame;
+        var rows = new List<(string label, Func<int, string> value)>
+        {
+            ("Cue", i => state.Players[i].Cue.Name),
+            (snooker ? "Frames" : "Racks won", i => state.Players[i].RacksWon.ToString()),
+        };
+        if (points) rows.Add(("Score", i => state.Players[i].Score.ToString()));
+        if (snooker)
+        {
+            rows.Add(("Current break", i => state.Current == i ? state.CurrentBreak.ToString() : "–"));
+            rows.Add(("Highest break", i => state.Players[i].HighBreak.ToString()));
+        }
+        else
+        {
+            rows.Add(("Current run", i => state.Current == i ? state.Run.ToString() : "–"));
+            rows.Add(("Best run", i => state.Players[i].BestRun.ToString()));
+        }
+        rows.Add(("Shots", i => state.Players[i].Shots.ToString()));
+        rows.Add(("Pot success", i => state.Players[i].Shots == 0 ? "–" : $"{100.0 * state.Players[i].Pots / state.Players[i].Shots:0}%"));
+        rows.Add(("Fouls", i => state.Players[i].Fouls.ToString()));
+
+        int n = state.PlayerCount;
+        float labelX = r.X + 36 * u, colW = 190 * u, col0 = r.X + 250 * u, y = r.Y + 86 * u, rowH = 25 * u;
+        for (int i = 0; i < n; i++)
+            Gfx.Text(g, state.Players[i].Name, Theme.F(17 * u, FontStyle.Bold), Theme.PlayerColor(i), new RectangleF(col0 + i * colW, y, colW, 24 * u), StringAlignment.Center);
+        y += 30 * u;
+        foreach (var (label, value) in rows)
+        {
+            Gfx.Text(g, label, Theme.F(14 * u), Theme.TextDim, new RectangleF(labelX, y, 200 * u, rowH));
+            for (int i = 0; i < n; i++)
+                Gfx.Text(g, value(i), Theme.F(15 * u, FontStyle.Bold), Theme.Text, new RectangleF(col0 + i * colW, y, colW, rowH), StringAlignment.Center);
+            y += rowH;
+        }
+
+        if (n == 2)
+        {
+            y += 8 * u;
+            void OddsRow(string label, double p0)
+            {
+                Gfx.Text(g, label, Theme.F(14 * u, FontStyle.Bold), Theme.Text, new RectangleF(labelX, y, 200 * u, rowH));
+                float bx = col0 + 10 * u, bw = colW * 2 - 20 * u, by = y + 8 * u, bh = 10 * u;
+                using (var b1 = new SolidBrush(Theme.A(Theme.Magenta, 210))) g.FillRectangle(b1, bx, by, bw, bh);
+                using (var b0 = new SolidBrush(Theme.A(Theme.Cyan, 230))) g.FillRectangle(b0, bx, by, (float)(bw * p0), bh);
+                Gfx.Text(g, $"{p0 * 100:0}%", Theme.F(12 * u, FontStyle.Bold), Theme.Cyan, new RectangleF(bx - 48 * u, y, 44 * u, rowH), StringAlignment.Far);
+                Gfx.Text(g, $"{(1 - p0) * 100:0}%", Theme.F(12 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(bx + bw + 6 * u, y, 50 * u, rowH));
+                y += rowH + 4 * u;
+            }
+            OddsRow(snooker ? "Win this frame" : "Win this rack", WinOdds.Rack(state, rules, 0));
+            if (rules.UsesRaceTo) OddsRow("Win the match", WinOdds.Match(state, rules, 0));
+            if (snooker)
+            {
+                string note = $"{SnookerRules.PointsRemaining(state)} points left on the table";
+                for (int i = 0; i < 2; i++) if (SnookerRules.NeedsSnookers(state, i)) note += $"  •  {state.Players[i].Name} needs snookers";
+                Gfx.Text(g, note, Theme.F(13 * u), Theme.Amber, new RectangleF(labelX, y, r.Width - 72 * u, rowH));
+                y += rowH;
+            }
+        }
+
+        // The story so far.
+        float lx = r.X + 36 * u;
+        y += 6 * u;
+        Gfx.Text(g, "MATCH LOG", Theme.F(12 * u, FontStyle.Bold), Theme.Magenta, new RectangleF(lx, y, 200 * u, 18 * u));
+        y += 20 * u;
+        var recent = eventLog.Skip(Math.Max(0, eventLog.Count - 4)).Reverse().ToList();
+        if (recent.Count == 0) Gfx.Text(g, "Nothing notable yet", Theme.F(13 * u), Theme.TextDim, new RectangleF(lx, y, r.Width - 72 * u, 18 * u));
+        foreach (var e in recent)
+        {
+            Gfx.Text(g, e, Theme.F(13 * u), Theme.TextDim, new RectangleF(lx, y, r.Width - 72 * u, 18 * u));
+            y += 18 * u;
+        }
+        Gfx.Text(g, "Tab to close", Theme.F(12 * u), Theme.A(Theme.TextDim, 150), new RectangleF(r.X, r.Bottom - 26 * u, r.Width, 18 * u), StringAlignment.Center);
+    }
+
+    /// <summary>Keeps the notable moments (fouls, big runs, rack results) for the scoreboard.</summary>
+    void LogShot(string who, ShotOutcome o, int runIncludingShot, int breakIncludingShot)
+    {
+        foreach (var m in o.Messages)
+            if (m.StartsWith("FOUL") || m.Contains("wins") || m.Contains("sinks") || m.Contains("concedes")
+                || m.Contains("reaches") || m.Contains("early") || m.Contains("is SOLIDS") || m.Contains("is STRIPES"))
+                AddEvent(m.StartsWith("FOUL") ? $"{who}: {m}" : m);
+        bool visitOver = o.Foul || !o.TurnContinues || o.RackOver;
+        if (visitOver && rules.Mode == GameMode.Snooker && breakIncludingShot >= 20) AddEvent($"{who}: break of {breakIncludingShot}");
+        else if (visitOver && rules.Mode != GameMode.Snooker && !o.Foul && runIncludingShot >= 3) AddEvent($"{who}: ran {runIncludingShot} balls");
+        if (o.RackOver && state.RackWinner >= 0)
+            AddEvent($"{(rules.Mode == GameMode.Snooker ? "Frame" : "Rack")} {state.RackNumber} → {state.Players[state.RackWinner].Name}");
+    }
+
+    void AddEvent(string text)
+    {
+        eventLog.Add(text);
+        if (eventLog.Count > 40) eventLog.RemoveAt(0);
     }
 
     void BuildRackOverButtons()
@@ -970,6 +1122,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         DrawHud(g);
         DrawBottomBar(g);
         DrawToasts(g);
+        if (showStats && phase != Phase.RackOver && !paused) DrawScoreboard(g);
         if (phase == Phase.RackOver) DrawRackOver(g);
         else if (paused) DrawPause(g);
     }
@@ -1230,6 +1383,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             : $"FIRST TO {state.TargetScore}";
         Gfx.Text(g, sub, Theme.F(13 * u, FontStyle.Bold), Theme.TextDim, new RectangleF(cx - 150 * u, y + 34 * u, 300 * u, 20 * u), StringAlignment.Center);
 
+        DrawWinBar(g, cx, y + 80 * u);
         int target = rules.TargetBall(state);
         if (target > 0)
         {
@@ -1304,7 +1458,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             _ => "",
         };
         Gfx.Text(g, hint, Theme.F(15 * u), Theme.TextDim, new RectangleF(24 * u, h - 62 * u, w - 470 * u, 40 * u));
-        Gfx.Text(g, "Esc: menu   G: guide   M: sound", Theme.F(12 * u), Theme.A(Theme.TextDim, 140), new RectangleF(24 * u, h - 30 * u, 400 * u, 20 * u));
+        Gfx.Text(g, "Tab: scoreboard   Esc: menu   G: guide   M: sound", Theme.F(12 * u), Theme.A(Theme.TextDim, 140), new RectangleF(24 * u, h - 30 * u, 500 * u, 20 * u));
 
         // Power meter.
         spinRadius = 30 * u;

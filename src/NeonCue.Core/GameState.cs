@@ -19,6 +19,8 @@ public sealed class PlayerState
     public int Shots;
     public int Pots;
     public int HighBreak;
+    /// <summary>Most balls potted in one visit.</summary>
+    public int BestRun;
 
     public PlayerState Clone() => (PlayerState)MemberwiseClone();
 }
@@ -46,6 +48,8 @@ public sealed class GameState
     public bool OnColour;
     /// <summary>Snooker: points in the current visit.</summary>
     public int CurrentBreak;
+    /// <summary>Balls potted in the current visit.</summary>
+    public int Run;
 
     public Ball Cue => Balls[0];
     public int PlayerCount => Players.Length;
