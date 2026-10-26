@@ -107,6 +107,12 @@ sealed class MenuScreen : IScreen
         });
         rows.Add(new Row
         {
+            Label = "STROKE ERROR",
+            Value = () => cfg.StrokeError ? "Realistic (cue wobble)" : "Off (exact)",
+            Change = _ => cfg.StrokeError = !cfg.StrokeError,
+        });
+        rows.Add(new Row
+        {
             Label = "TABLE STYLE",
             Value = () => Look.Name(cfg.Style),
             Change = d =>
@@ -159,7 +165,7 @@ sealed class MenuScreen : IScreen
         size = s;
         u = Math.Clamp(Math.Min(s.Width / 1280f, s.Height / 800f), 0.75f, 2.2f);
         float cx = s.Width / 2f;
-        float w = 620 * u, h = 42 * u, gap = 5 * u, y = 202 * u;
+        float w = 620 * u, h = 38 * u, gap = 4 * u, y = 200 * u;
         for (int i = 0; i < rows.Count; i++)
             rows[i].Rect = new RectangleF(cx - w / 2, y + i * (h + gap), w, h);
         float by = y + rows.Count * (h + gap) + 44 * u;

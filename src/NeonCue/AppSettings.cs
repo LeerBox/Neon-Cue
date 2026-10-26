@@ -18,6 +18,8 @@ public sealed class AppSettings
     public int TargetScore { get; set; } = 50;
     public AimGuide Guide { get; set; } = AimGuide.Full;
     public AimAssist Assist { get; set; } = AimAssist.Light;
+    /// <summary>Off: the ball goes exactly where the guide shows. On: the cue's stroke wobble applies.</summary>
+    public bool StrokeError { get; set; }
     public bool Sound { get; set; } = true;
     public TableStyle Style { get; set; } = TableStyle.Classic;
 

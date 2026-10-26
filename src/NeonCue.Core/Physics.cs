@@ -40,7 +40,9 @@ public static class Physics
     public const double MuRoll = 0.01;       // rolling resistance
     public const double MuSpin = 0.03;       // spinning (vertical-axis) friction
     public const double BallRestitution = 0.95;
-    public const double BallFriction = 0.06; // ball-ball friction (throw)
+    /// <summary>Ball-ball friction falls with slip speed (Alciatore's fit to measured throw data).</summary>
+    public static double BallFriction(double slipUnitsPerSecond) =>
+        0.00942 + 0.108 * Math.Exp(-1.088 * slipUnitsPerSecond * MetersPerUnit);
     public const double CushionRestitution = 0.75;
     public const double CushionFriction = 0.2;
     public const double StopSpeed = 2.0;     // units/s
@@ -330,7 +332,7 @@ public static class Physics
                 double slip = Math.Sqrt(st * st + sz * sz);
                 if (slip > 1e-9)
                 {
-                    double j = Math.Min(BallFriction * jn, slip / 7);
+                    double j = Math.Min(BallFriction(slip) * jn, slip / 7);
                     double jt = -st / slip * j, jz = -sz / slip * j;
                     a.Vel += t * jt;
                     b.Vel -= t * jt;

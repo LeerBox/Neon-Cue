@@ -201,7 +201,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         // Cheaper cues wobble: human strokes pick up the cue's aim error (AI noise already includes it).
         var stick = state.CurrentPlayer.Cue;
-        if (!state.CurrentPlayer.IsAI && stick.AimError > 0) angle += Gauss() * stick.WobbleDeg(power) * Math.PI / 180;
+        if (cfg.StrokeError && !state.CurrentPlayer.IsAI && stick.AimError > 0) angle += Gauss() * stick.WobbleDeg(power) * Math.PI / 180;
         Physics.Strike(state.Cue, angle, power, side, top, stick, state.IsBreakShot);
         events = new ShotEvents();
         physicsAcc = 0;
@@ -318,6 +318,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         SyncRolling();
         UpdateAimDwell();
         UpdatePreview();
+        UpdateTrajectory();
         if (hintTask is { IsCompleted: true }) ApplyHint();
         if (paused) return;
         phaseTime += dt;
@@ -599,6 +600,86 @@ sealed class GameScreen : IScreen, IPhysicsListener
         });
     }
 
+    /// <summary>The aimed shot played out in the real physics: what the guide draws is what will happen.</summary>
+    sealed class Trajectory
+    {
+        public readonly List<Vec2> CuePath = new();
+        public readonly List<Vec2> ObjPath = new();
+        public int ContactIndex = -1;
+        public Vec2? Contact;
+        public int Target = -1;
+        public bool TargetPotted, CuePotted;
+        public Pocket? TargetPocket, CuePocket;
+    }
+
+    sealed class PocketWatch : IPhysicsListener
+    {
+        public readonly Dictionary<int, Pocket> Pockets = new();
+        public void BallCollision(Ball a, Ball b, double impactSpeed) { }
+        public void CushionHit(Ball ball, double impactSpeed) { }
+        public void BallPocketed(Ball ball, Pocket pocket) => Pockets[ball.Number] = pocket;
+    }
+
+    volatile Trajectory? trajectory;
+    int trajVersion;
+    (double aim, double power, double side, double top, Vec2 cue, int shot) trajKey;
+
+    void UpdateTrajectory()
+    {
+        if (!HumanTurn || phase != Phase.Aiming || cfg.Guide == AimGuide.Off)
+        {
+            trajectory = null;
+            trajKey = default;
+            return;
+        }
+        double power = Math.Max(0.03, dragging ? dragPower : kbPower);
+        var key = (aim: aimAngle, power: Math.Round(power, 3), side: spinSide, top: spinTop, cue: state.Cue.Pos, shot: state.ShotNumber);
+        bool same = Math.Abs(key.aim - trajKey.aim) < 1e-7 && key.power == trajKey.power && key.side == trajKey.side
+            && key.top == trajKey.top && Vec2.DistanceSq(key.cue, trajKey.cue) < 1e-8 && key.shot == trajKey.shot;
+        if (same) return;
+        trajKey = key;
+        int version = ++trajVersion;
+        var snap = state.Clone();
+        snap.BallInHand = false;
+        var stick = state.CurrentPlayer.Cue;
+        bool brk = state.IsBreakShot;
+        double angle = aimAngle, side = spinSide, top = spinTop;
+        Task.Run(() =>
+        {
+            var t = new Trajectory();
+            var balls = snap.Balls;
+            var watch = new PocketWatch();
+            var ev = new ShotEvents();
+            Physics.Strike(snap.Cue, angle, power, side, top, stick, brk);
+            t.CuePath.Add(snap.Cue.Pos);
+            for (int i = 0; i < 480 * 10; i++)
+            {
+                if (version != trajVersion) return;
+                bool moving = Physics.Step(balls, ev, watch);
+                if (t.Target < 0 && ev.FirstContact >= 0)
+                {
+                    t.Target = ev.FirstContact;
+                    t.Contact = snap.Cue.Pos;
+                    t.CuePath.Add(snap.Cue.Pos);
+                    t.ContactIndex = t.CuePath.Count - 1;
+                    t.ObjPath.Add(balls[t.Target].Pos);
+                }
+                if (i % 2 == 0 || !moving)
+                {
+                    if (!snap.Cue.Pocketed) t.CuePath.Add(snap.Cue.Pos);
+                    if (t.Target > 0 && !balls[t.Target].Pocketed) t.ObjPath.Add(balls[t.Target].Pos);
+                }
+                if (!moving) break;
+            }
+            t.TargetPotted = t.Target > 0 && balls[t.Target].Pocketed;
+            t.CuePotted = snap.Cue.Pocketed;
+            if (t.Target > 0) t.TargetPocket = watch.Pockets.GetValueOrDefault(t.Target);
+            t.CuePocket = watch.Pockets.GetValueOrDefault(0);
+            if (t.TargetPotted && t.TargetPocket != null) t.ObjPath.Add(t.TargetPocket.DrawCenter);
+            if (version == trajVersion) trajectory = t;
+        });
+    }
+
     int PowerStep(double power) => Math.Clamp((int)Math.Round(power * PreviewSteps), 1, PreviewSteps);
 
     /// <summary>Called every frame: a resting cursor settles the aim, with the aim assist.</summary>
@@ -653,6 +734,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
         var stick = state.CurrentPlayer.Cue;
         Vec2 c = state.Cue.Pos;
         double best = raw, bestD = window;
+        int bestTarget = -1;
+        Vec2 bestAim = default;
         foreach (var t in state.Balls)
         {
             if (t.Number == 0 || t.Pocketed || !rules.IsLegalFirstContact(state, t.Number) || !rules.IsGoodPot(state, t.Number)) continue;
@@ -668,9 +751,12 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 if (!PathClear(c, ghost, 0, t.Number) || !PathClear(t.Pos, aim, t.Number, 0)) continue;
                 double stickAngle = cg.Angle + spinSide * stick.Squirt * Math.PI / 180;
                 double d = Math.Abs(Math.IEEERemainder(stickAngle - raw, 2 * Math.PI));
-                if (d < bestD) { bestD = d; best = stickAngle; }
+                if (d < bestD) { bestD = d; best = stickAngle; bestTarget = t.Number; bestAim = aim; }
             }
         }
+        // Real balls throw: snap to the line that actually sends the ball to the pocket.
+        if (bestTarget > 0)
+            best = ShotSolver.RefineAim(state, bestTarget, bestAim, best, Math.Max(0.05, kbPower), spinSide, spinTop, stick);
         return best;
     }
 
@@ -981,23 +1067,36 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     void DrawAimGuide(Graphics g)
     {
-        // The guide shows where the ball really goes: side spin squirts it off the stick line.
-        var stick = state.CurrentPlayer.Cue;
-        Vec2 c = state.Cue.Pos, d = Vec2.FromAngle(Physics.LaunchAngle(aimAngle, spinSide, stick));
+        var tr = trajectory;
         bool full = cfg.Guide == AimGuide.Full;
-        bool eagle = stick.Has(CuePerk.EagleEye);
+        var stick = state.CurrentPlayer.Cue;
         double vision = stick.Vision;
-        double tRail = RayToRail(c, d);
-        var (hit, tHit) = FirstHit(c, d);
+        Vec2 c = state.Cue.Pos, d = Vec2.FromAngle(Physics.LaunchAngle(aimAngle, spinSide, stick));
 
-        DrawAccuracyCone(g, c, d, hit != null && tHit < tRail ? tHit : tRail, stick);
-        if (hit != null && tHit < tRail)
+        if (cfg.StrokeError)
         {
-            Vec2 ghost = c + d * tHit;
-            bool legal = rules.IsLegalFirstContact(state, hit.Number);
-            Color col = legal ? GuideColor : Theme.Red;
-            Gfx.GlowLine(g, P(c), P(ghost), Theme.A(col, 210), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
+            var (h0, t0) = FirstHit(c, d);
+            DrawAccuracyCone(g, c, d, h0 != null ? t0 : RayToRail(c, d), stick);
+        }
 
+        if (tr == null)
+        {
+            // Simulation still running for this aim: plain launch line until it lands.
+            var (hit, tHit) = FirstHit(c, d);
+            Vec2 end2 = c + d * (hit != null ? tHit : RayToRail(c, d));
+            Gfx.GlowLine(g, P(c), P(end2), Theme.A(GuideColor, 150), 1f, 1.4f, 2, 22, DashStyle.Dash);
+            return;
+        }
+
+        bool legal = tr.Target <= 0 || rules.IsLegalFirstContact(state, tr.Target);
+        Color col = legal ? GuideColor : Theme.Red;
+
+        // Cue ball to first contact (exactly where the physics puts it).
+        DrawPath(g, tr.CuePath, 0, tr.ContactIndex >= 0 ? tr.ContactIndex : tr.CuePath.Count - 1,
+            full ? double.MaxValue : 900 * vision, Theme.A(col, 220), 1.1f, DashStyle.Dash);
+
+        if (tr.Contact is Vec2 ghost)
+        {
             var gr = new RectangleF((float)(ghost.X - R), (float)(ghost.Y - R), (float)(2 * R), (float)(2 * R));
             using (var gb = new SolidBrush(Theme.A(col, 30))) g.FillEllipse(gb, gr);
             using (var gp = new Pen(Theme.A(col, 220), 1.3f)) g.DrawEllipse(gp, gr);
@@ -1010,60 +1109,71 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 return;
             }
 
-            Vec2 n = (hit.Pos - ghost).Normalized();
-            double toRail = RayToRail(hit.Pos, n);
-            double objLen = full ? Math.Min(toRail + R, 700 * vision) : 70 * vision;
-            Vec2 objEnd = hit.Pos + n * objLen;
-            Gfx.GlowLine(g, P(hit.Pos), P(objEnd), Color.FromArgb(230, 255, 255, 255), 1.4f, 2, 3, 36);
-            if (eagle && toRail < 700 * vision) DrawBounce(g, hit.Pos + n * toRail, n, 260, Color.White);
+            // Object ball's real path (throw included), and the cue ball's path after contact
+            // (draw, follow and stun curves come straight from the spin).
+            double objBudget = full ? (stick.Has(CuePerk.EagleEye) ? double.MaxValue : 1400 * vision) : 90 * vision;
+            double cueBudget = full ? 700 * vision : 45 * vision;
+            DrawPath(g, tr.ObjPath, 0, tr.ObjPath.Count - 1, objBudget, Color.FromArgb(230, 255, 255, 255), 1.4f, DashStyle.Solid);
+            if (tr.ContactIndex >= 0)
+                DrawPath(g, tr.CuePath, tr.ContactIndex, tr.CuePath.Count - 1, cueBudget, TangentColor, 1.1f, DashStyle.Solid);
 
             if (full)
             {
-                // Green: this exact aim AND power pots it (simulated). Amber: the line is right, the power isn't.
-                var pv = preview;
-                double power = dragging ? dragPower : kbPower;
-                bool potsNow = pv != null && pv.Target == hit.Number && pv.Pots[PowerStep(power)];
-                bool potsSome = pv != null && pv.Target == hit.Number && pv.Any;
-                foreach (var pk in Table.Pockets)
-                {
-                    Vec2 rel = pk.Aim - hit.Pos;
-                    double along = Vec2.Dot(rel, n);
-                    if (along <= 0 || along > objLen + 3 * R) continue;
-                    if (Math.Abs(Vec2.Cross(n, rel)) < 0.9 * R)
-                    {
-                        using var ring = new GraphicsPath();
-                        float pr = (float)pk.DrawRadius + 3;
-                        ring.AddEllipse((float)pk.DrawCenter.X - pr, (float)pk.DrawCenter.Y - pr, pr * 2, pr * 2);
-                        Gfx.GlowPath(g, ring, potsNow ? Theme.Lime : potsSome ? Theme.Amber : Theme.A(Color.White, 120), 2f, 2.5f, 4, 50);
-                    }
-                }
-                if (pv != null && pv.Target == hit.Number && !potsNow && pv.Stops[PowerStep(power)] is Vec2 stop)
-                {
-                    float sr2 = (float)R;
-                    using var sp = new Pen(Theme.A(Theme.Amber, 200), 1.2f) { DashStyle = DashStyle.Dot };
-                    g.DrawEllipse(sp, (float)stop.X - sr2, (float)stop.Y - sr2, sr2 * 2, sr2 * 2);
-                }
+                if (!tr.TargetPotted && tr.ObjPath.Count > 1) DrawStop(g, tr.ObjPath[^1], Theme.A(Color.White, 170));
+                if (!tr.CuePotted && tr.CuePath.Count > 1) DrawStop(g, tr.CuePath[^1], Theme.A(TangentColor, 200));
             }
+        }
 
-            Vec2 tan = d - n * Vec2.Dot(d, n);
-            if (tan.Length > 0.02)
-            {
-                double len = (full ? 150 : 45) * vision * tan.Length;
-                Gfx.GlowLine(g, P(ghost), P(ghost + tan.Normalized() * len), TangentColor, 1.1f, 1.5f, 2, 30);
-            }
-            else if (full && Math.Abs(spinTop) > 0.05)
-            {
-                // Straight-in: show follow / draw direction.
-                Vec2 dir = d * Math.Sign(spinTop);
-                Gfx.GlowLine(g, P(ghost), P(ghost + dir * (40 + 80 * Math.Abs(spinTop))), TangentColor, 1.1f, 1.5f, 2, 30);
-            }
-        }
-        else
+        // Pocket verdicts come from the simulation, so green means this exact shot drops it.
+        if (tr.TargetPotted && tr.TargetPocket != null) Ring(g, tr.TargetPocket, Theme.Lime);
+        if (tr.CuePotted && tr.CuePocket != null)
         {
-            Vec2 p = c + d * tRail;
-            Gfx.GlowLine(g, P(c), P(p), Theme.A(GuideColor, 200), 1.1f, 1.6f, 2, 30, DashStyle.Dash);
-            if (full || eagle) DrawBounce(g, p, d, (eagle ? 320 : 130) * vision, GuideColor);
+            Ring(g, tr.CuePocket, Theme.Red);
+            var at = tr.CuePocket.DrawCenter;
+            using var f = new Font(Theme.Family, 13, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var br = new SolidBrush(Theme.Red);
+            g.DrawString("SCRATCH", f, br, (float)at.X - 28, (float)at.Y + (at.Y < Table.Height / 2 ? 20 : -36));
         }
+    }
+
+    void Ring(Graphics g, Pocket pk, Color color)
+    {
+        using var ring = new GraphicsPath();
+        float pr = (float)pk.DrawRadius + 3;
+        ring.AddEllipse((float)pk.DrawCenter.X - pr, (float)pk.DrawCenter.Y - pr, pr * 2, pr * 2);
+        Gfx.GlowPath(g, ring, color, 2f, 2.5f, 4, 50);
+    }
+
+    void DrawStop(Graphics g, Vec2 at, Color color)
+    {
+        float rr = (float)R;
+        using var pen = new Pen(color, 1.1f) { DashStyle = DashStyle.Dot };
+        g.DrawEllipse(pen, (float)at.X - rr, (float)at.Y - rr, rr * 2, rr * 2);
+    }
+
+    /// <summary>Draws path[from..to] up to <paramref name="budget"/> units of length.</summary>
+    static void DrawPath(Graphics g, List<Vec2> path, int from, int to, double budget, Color color, float width, DashStyle dash)
+    {
+        if (to <= from || from < 0) return;
+        var pts = new List<PointF> { P(path[from]) };
+        double used = 0;
+        for (int i = from + 1; i <= to && i < path.Count; i++)
+        {
+            double seg = Vec2.Distance(path[i - 1], path[i]);
+            if (used + seg > budget)
+            {
+                double f = (budget - used) / seg;
+                pts.Add(P(Vec2.Lerp(path[i - 1], path[i], f)));
+                break;
+            }
+            used += seg;
+            pts.Add(P(path[i]));
+        }
+        if (pts.Count < 2) return;
+        using var glow = new Pen(Theme.A(color, 40), width + 3) { LineJoin = LineJoin.Round, DashStyle = dash };
+        using var pen = new Pen(color, width) { LineJoin = LineJoin.Round, DashStyle = dash };
+        g.DrawLines(glow, pts.ToArray());
+        g.DrawLines(pen, pts.ToArray());
     }
 
     /// <summary>Shaded wedge showing the cue's stroke wobble (2 sigma) at the current power.</summary>

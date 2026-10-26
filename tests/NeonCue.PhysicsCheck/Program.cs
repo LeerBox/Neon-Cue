@@ -48,17 +48,25 @@ Vec2 Mid = new(Table.Width / 2, Table.Height / 2);
     Check("Stun shot: cue speed after full hit / before", c.Vel.Length / v0, 0, 0.04, "");
 }
 
-// 3. Draw and follow on a straight-in shot.
-double FinalCueOffset(double top)
+// 3. Draw and follow on a straight-in shot: how far the cue ball travels back / on after contact.
+(double back, double on) AfterContact(double top)
 {
     var c = Cue(new Vec2(300, 250));
     var o = Obj(1, new Vec2(300 + 2 * R + 60, 250));
-    Physics.Strike(c, 0, 0.55, 0, top);
-    Physics.Simulate([c, o]);
-    return c.Pos.X - (o.Pos.X > 0 ? 300 + 60 : 360); // relative to the contact point
+    Physics.Strike(c, 0, 0.3, 0, top);
+    var balls = new[] { c, o };
+    var ev = new ShotEvents();
+    while (o.Vel.LengthSq == 0 && c.IsMoving) Physics.Step(balls, ev, null);
+    double contactX = c.Pos.X, minX = contactX, maxX = contactX;
+    while (Physics.Step(balls, ev, null)) { minX = Math.Min(minX, c.Pos.X); maxX = Math.Max(maxX, c.Pos.X); }
+    return (contactX - minX, maxX - contactX);
 }
-Check("Draw (bottom spin): cue ball comes back (units behind contact)", -FinalCueOffset(-1), 40, 2000, "units");
-Check("Follow (top spin): cue ball runs through (units past contact)", FinalCueOffset(1), 40, 2000, "units");
+var drawn = AfterContact(-1);
+var followed = AfterContact(1);
+var stunned = AfterContact(0);
+Check("Draw (bottom spin): cue ball comes back (units)", drawn.back, 40, 2000, "units");
+Check("Follow (top spin): cue ball runs through (units)", followed.on, 40, 2000, "units");
+Check("Stun (centre ball, sliding): cue ball stays near contact (units)", Math.Max(stunned.back, stunned.on), 0, 15, "units");
 
 // 4. 90-degree rule: a stunned (sliding, no-spin) cue ball and the object ball separate at 90 degrees.
 {
@@ -68,7 +76,8 @@ Check("Follow (top spin): cue ball runs through (units past contact)", FinalCueO
     var balls = new[] { c, o };
     var ev = new ShotEvents();
     while (o.Vel.LengthSq == 0) Physics.Step(balls, ev, null);
-    Check("90° rule: separation angle after a stun cut", AngleBetween(c.Vel, o.Vel), 86, 94, "deg");
+    // Theory with e = 0.95 and fast-shot friction: slightly under 90 degrees.
+    Check("90° rule: separation angle after a stun cut", AngleBetween(c.Vel, o.Vel), 85, 92, "deg");
 }
 
 // 5. 30-degree rule: a rolling cue ball deflects about 30 degrees on a half-ball hit.
