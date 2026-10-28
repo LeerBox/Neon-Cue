@@ -237,15 +237,18 @@ static class GdiCheck
             var host = new Host { Settings = settings };
             var gs = new GameScreen(host);
             Size? from = null, to = null;
-            for (int h = 700; h < 1200 && from == null; h++)
-            {
-                var s0 = new Size(1500, h);
-                var s1 = new Size(1500, h + 1);
-                float r0 = PixelRadius(s0), r1 = PixelRadius(s1);
-                int z0 = Math.Max(1, (int)Math.Ceiling(r0 * 2f) + 3);
-                int z1 = Math.Max(1, (int)Math.Ceiling(r1 * 2f) + 3);
-                if (z0 != z1 && Math.Abs(r0 - r1) <= 0.01f) { from = s0; to = s1; }
-            }
+            // Search a wide range of windows, growing either side by one pixel, so the case is
+            // found whichever table (pool or snooker) and scale the run starts with.
+            for (int h = 600; h < 1600 && from == null; h++)
+                for (int w = 900; w < 2600 && from == null; w++)
+                    foreach (var s1 in new[] { new Size(w + 1, h), new Size(w, h + 1) })
+                    {
+                        var s0 = new Size(w, h);
+                        float r0 = PixelRadius(s0), r1 = PixelRadius(s1);
+                        int z0 = Math.Max(1, (int)Math.Ceiling(r0 * 2f) + 3);
+                        int z1 = Math.Max(1, (int)Math.Ceiling(r1 * 2f) + 3);
+                        if (z0 != z1 && Math.Abs(r0 - r1) <= 0.01f) { from = s0; to = s1; break; }
+                    }
             if (from is not Size a || to is not Size b)
                 throw new InvalidOperationException("No one-pixel resize crosses a sprite boundary inside the cache tolerance.");
             using var frame = new Bitmap(b.Width, b.Height);
