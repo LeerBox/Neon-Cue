@@ -28,6 +28,12 @@ sealed class SoundFx : IDisposable
     public void Cue(double power, double x01 = 0.5, string? cueId = null) =>
         Play(bank.CueStrike(cueId), 0.3 + 0.6 * Math.Clamp(power, 0, 1), x01, 0.02);
 
+    /// <summary>Once, when a draw becomes a shot. Not a loop under the hand.</summary>
+    public void CueDraw(string? cueId, double x01 = 0.5) => Play(bank.CueDraw(cueId), 0.32, x01, 0.01);
+
+    /// <summary>A quiet version of the strike, played when a cue is equipped.</summary>
+    public void CueEquip(string cueId) => Play(bank.CueStrike(cueId), 0.32, 0.5, 0);
+
     /// <summary>Demo of a cue's strike (shop).</summary>
     public void CuePreview(string cueId) => Play(bank.CueStrike(cueId), 0.75, 0.5, 0);
     public void Pocket(double x01 = 0.5) => Play(bank.Pocket, 0.85, x01, 0.04);

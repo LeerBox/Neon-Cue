@@ -26,9 +26,9 @@ static class Look
 
     public static string Name(TableStyle s) => s switch
     {
-        TableStyle.Classic => "Classic green",
-        TableStyle.Tournament => "Tournament blue",
-        TableStyle.Royal => "Royal burgundy",
+        TableStyle.Classic => "Classic Green",
+        TableStyle.Tournament => "Tournament Blue",
+        TableStyle.Royal => "Royal Burgundy",
         _ => "Neon",
     };
 

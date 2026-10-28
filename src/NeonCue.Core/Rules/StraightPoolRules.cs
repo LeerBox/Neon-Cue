@@ -5,7 +5,7 @@ public sealed class StraightPoolRules : GameRules
 {
     public override GameMode Mode => GameMode.StraightPool;
     public override string Name => "Straight Pool";
-    public override string Tagline => "Any ball, any pocket. One point per ball, -1 per foul. Endless re-racks to the target.";
+    public override string Tagline => "Any ball, any pocket. One point per ball. A foul costs one point.";
     public override bool UsesRaceTo => false;
     public override bool IsPointsGame => true;
 
@@ -31,7 +31,7 @@ public sealed class StraightPoolRules : GameRules
             o.Foul = true;
             o.FoulReason = foul;
             me.Score -= 1;
-            o.Messages.Add($"FOUL — {foul} (-1)");
+            o.Messages.Add($"FOUL. {foul}. One point deducted.");
             foreach (var n in objs) Respot(s, n);
         }
         else
@@ -45,7 +45,7 @@ public sealed class StraightPoolRules : GameRules
         {
             o.RackOver = true;
             o.Winner = s.Current;
-            o.Messages.Add($"{me.Name} reaches {s.TargetScore}!");
+            o.Messages.Add($"{me.Name} reaches {s.TargetScore}.");
             return o;
         }
 
@@ -53,7 +53,7 @@ public sealed class StraightPoolRules : GameRules
         {
             Rerack(s, rng);
             o.Reracked = true;
-            o.Messages.Add("Re-rack!");
+            o.Messages.Add("The balls are re-racked.");
         }
         return o;
     }
@@ -92,7 +92,7 @@ public sealed class PracticeRules : GameRules
 {
     public override GameMode Mode => GameMode.Practice;
     public override string Name => "Practice";
-    public override string Tagline => "Solo free play. No fouls, no pressure — sharpen your stroke and position.";
+    public override string Tagline => "Open practice. Place any ball. Fouls are not called.";
     public override bool UsesRaceTo => false;
     public override bool IsSolo => true;
 
@@ -118,7 +118,7 @@ public sealed class PracticeRules : GameRules
         if (ev.CueScratched)
         {
             o.ForceBallInHand = true;
-            o.Messages.Add("Scratch — ball in hand");
+            o.Messages.Add("Cue ball pocketed. Ball in hand.");
         }
         if (!s.ObjectBallsOnTable.Any())
         {
@@ -126,7 +126,7 @@ public sealed class PracticeRules : GameRules
             o.Reracked = true;
             o.ForceBallInHand = true;
             o.ForceKitchen = true;
-            o.Messages.Add("Rack cleared! New rack");
+            o.Messages.Add("Rack cleared. A new rack is set.");
         }
         return o;
     }
@@ -147,6 +147,6 @@ public sealed class PracticeRules : GameRules
     public override string Status(GameState s, int player)
     {
         var p = s.Players[player];
-        return $"{p.Score} potted • {p.Shots} shots";
+        return $"{p.Score} pocketed · {p.Shots} shots";
     }
 }

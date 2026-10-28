@@ -1,5 +1,26 @@
 namespace NeonCue.Core;
 
+/// <summary>Live contact marks for the V overlay. Recording is off unless <see cref="Show"/> is set, so AI searches stay quiet.</summary>
+public static class ShotTrace
+{
+    public static bool Show;
+    public readonly struct Mark
+    {
+        public readonly Vec2 At;
+        public readonly Vec2 Dir;
+        public readonly bool Cushion;
+        public Mark(Vec2 at, Vec2 dir, bool cushion) { At = at; Dir = dir; Cushion = cushion; }
+    }
+    public static readonly List<Mark> Marks = new();
+    public static void Clear() => Marks.Clear();
+    public static void Hit(Vec2 at, Vec2 dir, bool cushion)
+    {
+        if (!Show) return;
+        Marks.Add(new Mark(at, dir, cushion));
+        if (Marks.Count > 32) Marks.RemoveAt(0);
+    }
+}
+
 /// <summary>Receives real-time physics events (sound, particles). AI simulations pass null.</summary>
 public interface IPhysicsListener
 {
@@ -26,8 +47,8 @@ public sealed class ShotEvents
 /// Deterministic billiards physics with real-world constants. Every ball carries a 3-D spin vector;
 /// the cloth makes it slide, then roll (at 5/7 of its speed when struck in the centre); follow,
 /// draw and stun come out of the spin itself; ball-to-ball friction produces cut- and spin-induced
-/// throw; cushions grip the spinning ball, so english changes the rebound. The same code drives the
-/// live table, the aim prediction and the AI, so what is predicted is exactly what happens.
+/// throw; the cushion nose sits above the equator, so english, follow and draw all change the rebound.
+/// The same code drives the live table, the aim prediction and the AI, so what is predicted is exactly what happens.
 /// Table frame: x right, y towards the bottom rail, z down into the cloth; unit mass.
 /// </summary>
 public static class Physics
@@ -43,8 +64,10 @@ public static class Physics
     /// <summary>Ball-ball friction falls with slip speed (Alciatore's fit to measured throw data).</summary>
     public static double BallFriction(double slipUnitsPerSecond) =>
         0.00942 + 0.108 * Math.Exp(-1.088 * slipUnitsPerSecond * MetersPerUnit);
-    public const double CushionRestitution = 0.75;
-    public const double CushionFriction = 0.2;
+    public const double CushionRestitution = 0.78;
+    public const double CushionFriction = 0.28;
+    /// <summary>The cushion nose meets the ball this far above the equator. A high nose grips follow and draw.</summary>
+    const double CushionFace = 0.14;
     public const double StopSpeed = 2.0;     // units/s
     const double SlipEps = 1.0;              // units/s of contact slip treated as rolling
 
@@ -59,10 +82,13 @@ public static class Physics
     /// <summary>Cue-ball speed of a full-power stroke (8 m/s).</summary>
     public static double MaxShotSpeed => 8.0 / MetersPerUnit;
 
-    /// <summary>Power (0..1, as on the power bar) to fraction of full speed: fine control on soft shots.</summary>
-    public static double SpeedFraction(double power) => 0.35 * power + 0.65 * power * power;
-    public static double PowerForSpeedFraction(double f) =>
-        Math.Clamp((-0.35 + Math.Sqrt(0.35 * 0.35 + 4 * 0.65 * Math.Clamp(f, 0, 1))) / (2 * 0.65), 0, 1);
+    /// <summary>
+    /// Power is the cue's speed as a fraction of a full stroke. The ball's launch speed is
+    /// proportional to that, which is what an instantaneous cue-tip collision produces
+    /// (ball speed = (1+e)·M/(M+m)·cue speed, a constant factor absorbed into <see cref="MaxShotSpeed"/>).
+    /// </summary>
+    public static double SpeedFraction(double power) => Math.Clamp(power, 0, 1);
+    public static double PowerForSpeedFraction(double f) => Math.Clamp(f, 0, 1);
 
     /// <summary>Launch speed that makes a ball struck dead-centre travel <paramref name="distance"/> before stopping.</summary>
     public static double SpeedToTravel(double distance) =>
@@ -122,8 +148,9 @@ public static class Physics
         }
         if (!any) return false;
 
-        // Never let a ball travel more than 0.4 R in one sub-step.
-        int sub = Math.Max(1, (int)Math.Ceiling(maxV * Dt / (0.4 * R)));
+        // Never let a ball travel more than 0.2 R in one sub-step, so a thin cut cannot
+        // pass the contact point between checks.
+        int sub = Math.Max(1, (int)Math.Ceiling(maxV * Dt / (0.2 * R)));
         double h = Dt / sub;
         for (int k = 0; k < sub; k++) SubStep(balls, ev, listener, h);
         return true;
@@ -140,22 +167,32 @@ public static class Physics
             else if (b.Wz != 0) SpinDown(b, h);
         }
 
-        for (int i = 0; i < n; i++)
+        // Several passes so A striking B into C resolves both contacts. Each pair is struck at most once.
+        Span<byte> seen = n <= 32 ? stackalloc byte[n * n] : new byte[n * n];
+        for (int pass = 0; pass < 4; pass++)
         {
-            var a = balls[i];
-            if (a.Pocketed) continue;
-            for (int j = i + 1; j < n; j++)
+            bool any = false;
+            for (int i = 0; i < n; i++)
             {
-                var b = balls[j];
-                if (b.Pocketed) continue;
-                if (!a.IsMoving && !b.IsMoving) continue;
-                double dx = b.Pos.X - a.Pos.X;
-                if (dx >= TwoR || dx <= -TwoR) continue;
-                double dy = b.Pos.Y - a.Pos.Y;
-                if (dy >= TwoR || dy <= -TwoR) continue;
-                if (dx * dx + dy * dy >= FourR2) continue;
-                Collide(a, b, h, ev, listener);
+                var a = balls[i];
+                if (a.Pocketed) continue;
+                for (int j = i + 1; j < n; j++)
+                {
+                    if (seen[i * n + j] != 0) continue;
+                    var b = balls[j];
+                    if (b.Pocketed) continue;
+                    if (!a.IsMoving && !b.IsMoving) continue;
+                    double dx = b.Pos.X - a.Pos.X;
+                    if (dx >= TwoR || dx <= -TwoR) continue;
+                    double dy = b.Pos.Y - a.Pos.Y;
+                    if (dy >= TwoR || dy <= -TwoR) continue;
+                    if (dx * dx + dy * dy >= FourR2) continue;
+                    Collide(a, b, h, ev, listener);
+                    seen[i * n + j] = 1;
+                    any = true;
+                }
             }
+            if (!any) break;
         }
 
         double r = R;
@@ -165,9 +202,9 @@ public static class Physics
             if (b.Pocketed || !b.IsMoving) continue;
             double x = b.Pos.X, y = b.Pos.Y;
             if (x > r + 1 && x < Table.Width - r - 1 && y > r + 1 && y < Table.Height - r - 1) continue;
-            if (CheckPocket(b, ev, listener)) continue;
+            if (CheckPocket(b, balls, ev, listener)) continue;
             foreach (var seg in Table.Cushions) CushionContact(b, seg, ev, listener);
-            CheckPocket(b, ev, listener);
+            CheckPocket(b, balls, ev, listener);
         }
     }
 
@@ -234,7 +271,7 @@ public static class Physics
         b.Wz = Math.Abs(b.Wz) <= dz ? 0 : b.Wz - Math.Sign(b.Wz) * dz;
     }
 
-    static bool CheckPocket(Ball b, ShotEvents ev, IPhysicsListener? listener)
+    static bool CheckPocket(Ball b, Ball[] balls, ShotEvents ev, IPhysicsListener? listener)
     {
         double x = b.Pos.X, y = b.Pos.Y;
         double m = 0.6 * R;
@@ -251,6 +288,15 @@ public static class Physics
             }
         }
         if (hit == null) return false;
+        // A ball cannot fall through another ball. If they still overlap, only the one
+        // closer to the hole may drop; the one behind is blocked by it.
+        foreach (var o in balls)
+        {
+            if (o == b || o.Pocketed) continue;
+            if (Vec2.DistanceSq(o.Pos, b.Pos) >= FourR2) continue;
+            if (Vec2.DistanceSq(o.Pos, hit.Center) < Vec2.DistanceSq(b.Pos, hit.Center))
+                return false;
+        }
         Drop(b, hit, ev, listener);
         return true;
     }
@@ -263,7 +309,11 @@ public static class Physics
         listener?.BallPocketed(b, pocket);
     }
 
-    /// <summary>Cushion: restitution on the normal, friction at the contact point (english grips the rubber).</summary>
+    /// <summary>
+    /// Cushion nose above the equator. The normal is tilted down into the cloth, so follow and draw
+    /// change the rebound angle, and side english still grips along the rail. Rubber gives back less
+    /// at higher impact speed.
+    /// </summary>
     static void CushionContact(Ball b, Segment seg, ShotEvents ev, IPhysicsListener? listener)
     {
         double r = R;
@@ -272,31 +322,121 @@ public static class Physics
         double d2 = diff.LengthSq;
         if (d2 >= r * r || d2 < 1e-12) return;
         double dist = Math.Sqrt(d2);
-        Vec2 n = diff / dist;           // into the table
-        b.Pos = cp + n * r;
-        double vn = Vec2.Dot(b.Vel, n);
-        if (vn >= 0) return;
+        Vec3 n2 = new(diff.X / dist, diff.Y / dist, 0); // horizontal, into the table
+        b.Pos = cp + new Vec2(n2.X, n2.Y) * r;
 
-        double jn = (1 + CushionRestitution) * -vn;
-        Vec2 t = new(-n.Y, n.X);
-        Vec2 v = b.Vel + n * jn;
+        double cos = Math.Cos(CushionFace), sin = Math.Sin(CushionFace);
+        Vec3 n3 = new(n2.X * cos, n2.Y * cos, sin);
+        Vec3 tangent = new(-n2.Y, n2.X, 0);
+        Vec3 rpos = new(-r * cos * n2.X, -r * cos * n2.Y, -r * sin);
+        double inertia = 0.4 * r * r;
 
-        // Tangential slip of the contact point (r = -R n): v.t - R wz.
-        double st = Vec2.Dot(v, t) - r * b.Wz;
-        double jt = -Math.Sign(st) * Math.Min(CushionFriction * jn, Math.Abs(st) / 3.5);
-        v += t * jt;
-        b.Wz += -2.5 * jt / r;
+        Vec3 v = new(b.Vel.X, b.Vel.Y, 0);
+        Vec3 w = new(b.Wx, b.Wy, b.Wz);
+        Vec3 vc = v + Vec3.Cross(w, rpos);
+        double approach = Vec3.Dot(vc, n3);
+        if (approach >= 0) return;
 
-        // The rubber also scrubs top/back spin (vertical slip at the contact point).
-        double sz = -r * (b.Wx * n.Y - b.Wy * n.X);
-        double jz = -Math.Sign(sz) * Math.Min(CushionFriction * jn, Math.Abs(sz) / 2.5);
-        b.Wx += -2.5 / r * jz * n.Y;
-        b.Wy += 2.5 / r * jz * n.X;
+        double impact = -Vec2.Dot(b.Vel, new Vec2(n2.X, n2.Y));
+        double e = CushionRestitution / (1 + 0.035 * impact * MetersPerUnit);
+        e = Math.Clamp(e, 0.5, 0.84);
 
-        b.Vel = v;
+        Vec3 rxn = Vec3.Cross(rpos, n3);
+        double kn = 1 + Vec3.Dot(rxn, rxn) / inertia;
+        double jn = -(1 + e) * approach / kn;
+        Apply(ref v, ref w, rpos, n3 * jn, inertia);
+
+        vc = v + Vec3.Cross(w, rpos);
+        Vec3 t2 = Vec3.Cross(n3, tangent).Normalized();
+        double s1 = Vec3.Dot(vc, tangent);
+        double s2 = Vec3.Dot(vc, t2);
+        Vec3 rt1 = Vec3.Cross(rpos, tangent);
+        Vec3 rt2 = Vec3.Cross(rpos, t2);
+        double k11 = 1 + Vec3.Dot(rt1, rt1) / inertia;
+        double k22 = 1 + Vec3.Dot(rt2, rt2) / inertia;
+        double k12 = Vec3.Dot(rt1, rt2) / inertia;
+        double det = k11 * k22 - k12 * k12;
+        double j1 = 0, j2 = 0;
+        if (Math.Abs(det) > 1e-12)
+        {
+            j1 = (-k22 * s1 + k12 * s2) / det;
+            j2 = (k12 * s1 - k11 * s2) / det;
+        }
+        double mag = Math.Sqrt(j1 * j1 + j2 * j2);
+        double cap = CushionFriction * Math.Abs(jn);
+        if (mag > cap && mag > 1e-12)
+        {
+            double scale = cap / mag;
+            j1 *= scale;
+            j2 *= scale;
+        }
+        Apply(ref v, ref w, rpos, tangent * j1 + t2 * j2, inertia);
+
+        b.Vel = new Vec2(v.X, v.Y);
+        b.Wx = w.X;
+        b.Wy = w.Y;
+        b.Wz = w.Z;
         if (ev.FirstContact >= 0) ev.RailAfterContact = true;
         if (b.Number != 0) ev.RailBalls.Add(b.Number);
-        listener?.CushionHit(b, -vn);
+        listener?.CushionHit(b, impact);
+        ShotTrace.Hit(b.Pos - new Vec2(n2.X, n2.Y) * R, new Vec2(n2.X, n2.Y), true);
+    }
+
+    /// <summary>Adds an impulse at the cushion contact and drops any velocity into the cloth.</summary>
+    static void Apply(ref Vec3 v, ref Vec3 w, Vec3 rpos, Vec3 impulse, double inertia)
+    {
+        v += impulse;
+        v = new Vec3(v.X, v.Y, 0);
+        w += Vec3.Cross(rpos, impulse) * (1 / inertia);
+    }
+
+    readonly struct Vec3
+    {
+        public readonly double X, Y, Z;
+        public Vec3(double x, double y, double z) { X = x; Y = y; Z = z; }
+        public static Vec3 operator +(Vec3 a, Vec3 b) => new(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
+        public static Vec3 operator *(Vec3 a, double s) => new(a.X * s, a.Y * s, a.Z * s);
+        public static double Dot(Vec3 a, Vec3 b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+        public static Vec3 Cross(Vec3 a, Vec3 b) => new(
+            a.Y * b.Z - a.Z * b.Y,
+            a.Z * b.X - a.X * b.Z,
+            a.X * b.Y - a.Y * b.X);
+        public double Length => Math.Sqrt(Dot(this, this));
+        public Vec3 Normalized()
+        {
+            double l = Length;
+            return l < 1e-12 ? this : this * (1 / l);
+        }
+    }
+
+    /// <summary>Equal-mass impulse along n (from a toward b): normal restitution, then friction at the contact point.</summary>
+    static void ResolveImpact(Ball a, Ball b, Vec2 n, double vn, ShotEvents ev, IPhysicsListener? listener)
+    {
+        double r = R;
+        double jn = (1 + BallRestitution) * 0.5 * vn;
+        a.Vel -= n * jn;
+        b.Vel += n * jn;
+
+        Vec2 t = new(-n.Y, n.X);
+        double st = Vec2.Dot(a.Vel - b.Vel, t) + r * a.Wz + r * b.Wz;
+        double sz = r * (a.Wx * n.Y - a.Wy * n.X) + r * (b.Wx * n.Y - b.Wy * n.X);
+        double slip = Math.Sqrt(st * st + sz * sz);
+        if (slip > 1e-9)
+        {
+            double j = Math.Min(BallFriction(slip) * jn, slip / 7);
+            double jt = -st / slip * j, jz = -sz / slip * j;
+            a.Vel += t * jt;
+            b.Vel -= t * jt;
+            double k = 2.5 / r;
+            double dwx = k * jz * n.Y, dwy = -k * jz * n.X, dwz = k * jt;
+            a.Wx += dwx; a.Wy += dwy; a.Wz += dwz;
+            b.Wx += dwx; b.Wy += dwy; b.Wz += dwz;
+        }
+
+        if (a.Number == 0 && ev.FirstContact < 0) ev.FirstContact = b.Number;
+        else if (b.Number == 0 && ev.FirstContact < 0) ev.FirstContact = a.Number;
+        listener?.BallCollision(a, b, vn);
+        ShotTrace.Hit(a.Pos + n * R, n, false);
     }
 
     /// <summary>Ball-ball: exact contact time, normal restitution, then friction at the contact point (throw).</summary>
@@ -306,6 +446,22 @@ public static class Physics
         Vec2 d = b.Pos - a.Pos;
         Vec2 rv = b.Vel - a.Vel;
         double dDotRv = Vec2.Dot(d, rv);
+        double dist2 = d.LengthSq;
+        // Centres have crossed (deep overlap, already separating). The contact happened
+        // earlier in the step and must still be resolved, or the striker keeps its speed.
+        bool crossed = dDotRv > 0 && dist2 < FourR2 * 0.90 && (a.IsMoving || b.IsMoving);
+
+        if (crossed)
+        {
+            Vec2 rel = a.Vel - b.Vel;
+            Vec2 n = rel.LengthSq > 1e-6 ? rel.Normalized() : (a.Pos - b.Pos).Normalized();
+            double vn = Vec2.Dot(rel, n);
+            if (vn > 1e-6) ResolveImpact(a, b, n, vn, ev, listener);
+            Vec2 mid = (a.Pos + b.Pos) * 0.5;
+            a.Pos = mid - n * r;
+            b.Pos = mid + n * r;
+            return;
+        }
 
         if (dDotRv < 0)
         {
@@ -319,33 +475,7 @@ public static class Physics
 
             Vec2 n = (b.Pos - a.Pos).Normalized();
             double vn = Vec2.Dot(a.Vel - b.Vel, n);
-            if (vn > 0)
-            {
-                double jn = (1 + BallRestitution) * 0.5 * vn;
-                a.Vel -= n * jn;
-                b.Vel += n * jn;
-
-                // Friction between the balls: horizontal (throw) and vertical (spin transfer) slip.
-                Vec2 t = new(-n.Y, n.X);
-                double st = Vec2.Dot(a.Vel - b.Vel, t) + r * a.Wz + r * b.Wz;
-                double sz = r * (a.Wx * n.Y - a.Wy * n.X) + r * (b.Wx * n.Y - b.Wy * n.X);
-                double slip = Math.Sqrt(st * st + sz * sz);
-                if (slip > 1e-9)
-                {
-                    double j = Math.Min(BallFriction(slip) * jn, slip / 7);
-                    double jt = -st / slip * j, jz = -sz / slip * j;
-                    a.Vel += t * jt;
-                    b.Vel -= t * jt;
-                    double k = 2.5 / r;
-                    double dwx = k * jz * n.Y, dwy = -k * jz * n.X, dwz = k * jt;
-                    a.Wx += dwx; a.Wy += dwy; a.Wz += dwz;
-                    b.Wx += dwx; b.Wy += dwy; b.Wz += dwz;
-                }
-
-                if (a.Number == 0 && ev.FirstContact < 0) ev.FirstContact = b.Number;
-                else if (b.Number == 0 && ev.FirstContact < 0) ev.FirstContact = a.Number;
-                listener?.BallCollision(a, b, vn);
-            }
+            if (vn > 0) ResolveImpact(a, b, n, vn, ev, listener);
 
             a.Pos += a.Vel * tb;
             b.Pos += b.Vel * tb;

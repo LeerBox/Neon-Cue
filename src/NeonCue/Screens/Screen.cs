@@ -10,6 +10,8 @@ interface IHost
     void ShowMenu();
     void StartGame();
     void ShowShop();
+    /// <summary>Open the cosmetic room for a cue the player already owns.</summary>
+    void ShowDress(string cueId) { }
     void Quit();
 }
 
@@ -21,11 +23,22 @@ interface IScreen
     void MouseDown(MouseEventArgs e) { }
     void MouseUp(MouseEventArgs e) { }
     void MouseWheel(MouseEventArgs e) { }
+    /// <summary>The window lost the mouse capture, so a held stroke cannot be finished.</summary>
+    void PointerCaptureLost() { }
     bool KeyDown(Keys keyData) => false;
 }
 
 sealed class UiButton
 {
+    /// <summary>Design-pixel sizes. Multiply by the screen scale. Every button of a kind uses these.</summary>
+    public const float PrimaryH = 48;
+    public const float SecondaryH = 40;
+    public const float Gap = 10;
+    public const float Radius = 4;
+    const float PrimaryType = 16;
+    const float SecondaryType = 13;
+    const float Track = 0.12f;
+
     public RectangleF Rect;
     public string Text = "";
     public Action OnClick = () => { };
@@ -33,13 +46,15 @@ sealed class UiButton
     public bool Hover;
     public Color Accent = Theme.Cyan;
 
+    public float Height(float u) => (Primary ? PrimaryH : SecondaryH) * u;
+
     public bool Contains(Point p) => Rect.Contains(p);
 
     /// <summary>Primary: solid champagne gold with dark lettering. Secondary: hairline outline that warms to gold on hover.</summary>
     public void Draw(Graphics g, float u)
     {
-        float radius = 4 * u;
-        using var path = Gfx.RoundRect(Rect, radius);
+        if (Rect.Width < 2 || Rect.Height < 2) return;
+        using var path = Gfx.RoundRect(Rect, Radius * u);
         if (Primary)
         {
             using var br = new LinearGradientBrush(Rect, Hover ? Ui.GoldBright : Theme.Mix(Ui.GoldBright, Ui.Gold, 0.4), Hover ? Ui.Gold : Theme.Mix(Ui.Gold, Color.Black, 0.12), 90f);
@@ -52,9 +67,9 @@ sealed class UiButton
             using var pen = new Pen(Hover ? Ui.Gold : Ui.LineStrong, 1f);
             g.DrawPath(pen, path);
         }
-        var font = Ui.Head((Primary ? 19 : 14) * u);
-        Ui.Tracked(g, Text.ToUpperInvariant(), font, Primary ? Ui.Ink : Hover ? Color.White : Ui.Text,
-            Rect.X + Rect.Width / 2, Rect.Y + Rect.Height / 2, (Primary ? 3.2f : 2.2f) * u, StringAlignment.Center);
+
+        var font = Ui.Head((Primary ? PrimaryType : SecondaryType) * u);
+        Ui.PlaceCentered(g, Text.ToUpperInvariant(), font, Primary ? Ui.Ink : Hover ? Color.White : Ui.Text, Rect, font.Size * Track);
     }
 
     public static bool Hit(IEnumerable<UiButton> buttons, Point p)

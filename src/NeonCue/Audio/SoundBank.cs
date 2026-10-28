@@ -45,7 +45,17 @@ public sealed class SoundBank
         ["dragon"] = new(830, 2.5, 62, 135, 0.35, 0.18, 2200, 9, 1.0),
         // Black diamond: deep, crisp knock with a shimmering double ring.
         ["royale"] = new(960, 2.8, 72, 118, 0.45, 0.22, 2900, 7, 1.05),
+        // Pale ash and linen: a small, dry, polite tap.
+        ["linen"] = new(740, 1.9, 90, 175, 0.18, 0.02, 1200, 28, 0.72),
+        // Ivory points: a short bright click, almost no body.
+        ["ivory"] = new(1240, 2.4, 120, 210, 0.5, 0.06, 3100, 36, 0.88),
+        // Helical carbon: a thin tick and a long high ring.
+        ["helix"] = new(1460, 3.3, 100, 160, 0.62, 0.2, 4200, 12, 0.92),
+        // Crystal: a soft knock that leaves a chime.
+        ["aurora"] = new(880, 2.6, 48, 150, 0.22, 0.28, 1760, 5, 0.9),
     };
+
+    readonly Dictionary<string, float[]> cueDraws = new();
 
     public SoundBank()
     {
@@ -87,12 +97,20 @@ public sealed class SoundBank
 
         Click = Synth(0.025, t => 0.3 * Math.Sin(2 * Math.PI * 1500 * t) * Math.Exp(-t * 160));
 
-        foreach (var (id, voice) in CueVoices) cueStrikes[id] = MakeCue(voice, id.GetHashCode());
+        foreach (var (id, voice) in CueVoices)
+        {
+            cueStrikes[id] = MakeCue(voice, id.GetHashCode());
+            cueDraws[id] = MakeDraw(voice, id.GetHashCode());
+        }
     }
 
     /// <summary>The strike sound of a cue (falls back to the starter cue's).</summary>
     public float[] CueStrike(string? cueId) =>
         cueId != null && cueStrikes.TryGetValue(cueId, out var s) ? s : cueStrikes["starter"];
+
+    /// <summary>The quiet sound of that cue being drawn back. One gesture, not a loop.</summary>
+    public float[] CueDraw(string? cueId) =>
+        cueId != null && cueDraws.TryGetValue(cueId, out var s) ? s : cueDraws["starter"];
 
     static float[] MakeCue(CueVoice v, int seed)
     {
@@ -108,6 +126,21 @@ public sealed class SoundBank
                 s += v.Ring * (Math.Sin(2 * Math.PI * v.RingPitch * t) + 0.5 * Math.Sin(2 * Math.PI * v.RingPitch * 1.5 * t))
                      * Math.Exp(-t * v.RingDecay) * Math.Min(1, t * 400);
             return s * v.Level;
+        });
+    }
+
+    /// <summary>A short draw: the shaft tone, soft, with that cue's ring if it has one.</summary>
+    static float[] MakeDraw(CueVoice v, int seed)
+    {
+        var rnd = new Random(seed + 17);
+        return Synth(0.16, t =>
+        {
+            double env = Math.Sin(Math.PI * Math.Clamp(t / 0.16, 0, 1));
+            double s = 0.25 * Math.Sin(2 * Math.PI * v.Thump * 0.5 * t) * env
+                     + 0.08 * v.Snap * (rnd.NextDouble() * 2 - 1) * Math.Exp(-t * 80);
+            if (v.Ring > 0)
+                s += v.Ring * 0.35 * Math.Sin(2 * Math.PI * v.RingPitch * 0.5 * t) * env;
+            return s * 0.55;
         });
     }
 

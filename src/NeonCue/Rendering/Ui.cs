@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 
 namespace NeonCue.Rendering;
 
@@ -58,12 +59,13 @@ static class Ui
 
     static Font Make(FontFamily fam, float px, FontStyle style)
     {
-        int k = (int)Math.Round(px * 2);
+        // Whole-pixel sizes. A 13.5 px face is grid-fit onto two different rows and looks fuzzy.
+        int k = Math.Max(6, (int)Math.Round(px));
         if (!fam.IsStyleAvailable(style)) style = FontStyle.Regular;
         var key = (fam.Name, k, style);
         if (!fonts.TryGetValue(key, out var font))
         {
-            font = new Font(fam, Math.Max(4, k / 2f), style, GraphicsUnit.Pixel);
+            font = new Font(fam, k, style, GraphicsUnit.Pixel);
             fonts[key] = font;
         }
         return font;
@@ -83,9 +85,46 @@ static class Ui
     static StringFormat MakeTypographic()
     {
         var f = (StringFormat)StringFormat.GenericTypographic.Clone();
-        f.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+        // GenericTypographic clips side bearings, which shears the first and last letter.
+        f.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoClip;
         return f;
     }
+
+    /// <summary>
+    /// UI text is grayscale and pixel-aligned. ClearType paints red and blue fringes, and on this
+    /// dark screen those fringes read as noise around every letter.
+    /// </summary>
+    internal readonly struct CrispText : IDisposable
+    {
+        readonly Graphics g;
+        readonly TextRenderingHint hint;
+        readonly PixelOffsetMode pixel;
+        readonly SmoothingMode smooth;
+        readonly CompositingQuality quality;
+
+        public CrispText(Graphics g)
+        {
+            this.g = g;
+            hint = g.TextRenderingHint;
+            pixel = g.PixelOffsetMode;
+            smooth = g.SmoothingMode;
+            quality = g.CompositingQuality;
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.None;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+        }
+
+        public void Dispose()
+        {
+            g.TextRenderingHint = hint;
+            g.PixelOffsetMode = pixel;
+            g.SmoothingMode = smooth;
+            g.CompositingQuality = quality;
+        }
+    }
+
+    static float Px(float v) => MathF.Round(v);
 
     static readonly Dictionary<(char, string, float), float> charWidths = new();
 
@@ -115,18 +154,98 @@ static class Ui
         float w = TrackedWidth(g, text, f, tracking);
         if (align == StringAlignment.Center) x -= w / 2;
         else if (align == StringAlignment.Far) x -= w;
-        float top = y - f.Size * 0.62f;
-        using var br = new SolidBrush(color);
+        float top = Px(y - f.Size * 0.78f);
+        x = Px(x);
+        using var crisp = new CrispText(g);
+        using var path = new GraphicsPath(FillMode.Winding);
         foreach (char c in text)
         {
-            g.DrawString(c.ToString(), f, br, x, top, Typographic);
+            if (c != ' ')
+                path.AddString(c.ToString(), f.FontFamily, (int)f.Style, f.Size, new PointF(x, top), Typographic);
+            x = Px(x + CharWidth(g, c, f) + tracking);
+        }
+        if (path.PointCount > 0)
+        {
+            using var br = new SolidBrush(color);
+            g.FillPath(br, path);
+        }
+    }
+
+    /// <summary>
+    /// Draws letter-spaced text so the ink itself is centered in <paramref name="box"/>.
+    /// The centre comes from the filled outlines, not from the font's em box, so capitals
+    /// do not sit low and a round letter does not pull the line off centre.
+    /// </summary>
+    public static void PlaceCentered(Graphics g, string text, Font f, Color color, RectangleF box, float tracking)
+    {
+        if (string.IsNullOrEmpty(text) || box.Width < 4 || box.Height < 4) return;
+        float inner = Math.Max(8, box.Width - f.Size);
+        float width = TrackedWidth(g, text, f, tracking);
+        if (width > inner && text.Length > 1)
+            tracking *= inner / width;
+
+        using var crisp = new CrispText(g);
+        using var path = new GraphicsPath(FillMode.Winding);
+        float x = 0;
+        foreach (char c in text)
+        {
+            if (c != ' ')
+                path.AddString(c.ToString(), f.FontFamily, (int)f.Style, f.Size, new PointF(x, 0), Typographic);
             x += CharWidth(g, c, f) + tracking;
         }
+        if (path.PointCount == 0) return;
+        path.Flatten(null, 0.2f);
+        RectangleF ink = path.GetBounds();
+        float dx = (box.X + box.Width / 2f) - (ink.Left + ink.Width / 2f);
+        float dy = (box.Y + box.Height / 2f) - (ink.Top + ink.Height / 2f);
+        using (var m = new Matrix())
+        {
+            m.Translate(dx, dy);
+            path.Transform(m);
+        }
+        using var br = new SolidBrush(color);
+        g.FillPath(br, path);
     }
 
     public static void Write(Graphics g, string text, Font f, Color color, RectangleF r,
         StringAlignment h = StringAlignment.Near, StringAlignment v = StringAlignment.Center) =>
         Gfx.Text(g, text, f, color, r, h, v);
+
+    /// <summary>Icon, label, and a quiet key. One height, one gap, shared by every screen.</summary>
+    public static void Legend(Graphics g, float x, float cy, float maxX, float u, params (Glyph icon, string key, string label)[] items)
+    {
+        foreach (var item in items)
+        {
+            float need = HintWidth(g, item.key, item.label, u);
+            if (x + need > maxX) break;
+            x = Hint(g, item.icon, item.key, item.label, x, cy, u);
+        }
+    }
+
+    static float Hint(Graphics g, Glyph icon, string key, string label, float x, float cy, float u)
+    {
+        float box = 15 * u;
+        var lf = Body(12.5f * u);
+        float lw = g.MeasureString(label, lf).Width;
+        Glyphs.Draw(g, icon, x + box / 2f, cy, box, Text2);
+        Write(g, label, lf, Text, new RectangleF(x + box + 6 * u, cy - 11 * u, lw + 2, 22 * u));
+        float next = x + box + 6 * u + lw;
+        if (key.Length > 0)
+        {
+            var kf = Head(10 * u);
+            float kw = g.MeasureString(key, kf).Width;
+            Write(g, key, kf, Text3, new RectangleF(next + 7 * u, cy - 10 * u, kw + 2, 20 * u));
+            next += 7 * u + kw;
+        }
+        return next + 18 * u;
+    }
+
+    static float HintWidth(Graphics g, string key, string label, float u)
+    {
+        float w = 15 * u + 6 * u + g.MeasureString(label, Body(12.5f * u)).Width;
+        if (key.Length > 0) w += 7 * u + g.MeasureString(key, Head(10 * u)).Width;
+        return w + 18 * u;
+    }
 
     // ------------------------------------------------------------------ surfaces
 
@@ -163,14 +282,6 @@ static class Ui
     {
         using var pen = new Pen(color ?? Line, width);
         g.DrawLine(pen, x1, y1, x2, y2);
-    }
-
-    /// <summary>Thin chevron arrow.</summary>
-    public static void Chevron(Graphics g, PointF c, float s, bool right, Color color, float width = 1.6f)
-    {
-        float d = right ? 1 : -1;
-        using var pen = new Pen(color, width) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-        g.DrawLines(pen, [new PointF(c.X - d * s * 0.35f, c.Y - s * 0.6f), new PointF(c.X + d * s * 0.35f, c.Y), new PointF(c.X - d * s * 0.35f, c.Y + s * 0.6f)]);
     }
 
     /// <summary>Dims the scene behind a modal panel.</summary>

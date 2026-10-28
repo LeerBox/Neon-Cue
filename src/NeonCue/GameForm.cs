@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using NeonCue.Core;
 using NeonCue.Rendering;
 using NeonCue.Screens;
 
@@ -65,10 +66,49 @@ sealed class GameForm : Form, IHost
         KeyPreview = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque | ControlStyles.UserPaint, true);
         try { Icon = Theme.CreateIcon(); } catch (ExternalException) { }
+        if (!Settings.Fullscreen) WindowState = FormWindowState.Maximized;
 
         screen = new MenuScreen(this);
         timeBeginPeriod(1);
         Application.Idle += OnIdle;
+    }
+
+    bool fullscreen;
+    Rectangle windowedBounds;
+    bool windowedMaximized;
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (Settings.Fullscreen) EnterFullscreen();
+    }
+
+    void ToggleFullscreen()
+    {
+        if (fullscreen) ExitFullscreen();
+        else EnterFullscreen();
+        Settings.Fullscreen = fullscreen;
+        Settings.Save();
+    }
+
+    void EnterFullscreen()
+    {
+        if (fullscreen) return;
+        windowedMaximized = WindowState == FormWindowState.Maximized;
+        if (windowedMaximized) WindowState = FormWindowState.Normal;
+        windowedBounds = Bounds;
+        FormBorderStyle = FormBorderStyle.None;
+        Bounds = Screen.FromControl(this).Bounds;
+        fullscreen = true;
+    }
+
+    void ExitFullscreen()
+    {
+        if (!fullscreen) return;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        fullscreen = false;
+        if (windowedMaximized) WindowState = FormWindowState.Maximized;
+        else Bounds = windowedBounds.Width > 0 ? windowedBounds : new Rectangle(Bounds.X, Bounds.Y, 1280, 800);
     }
 
     /// <summary>Frame period of the monitor the window is on (falls back to 144 Hz).</summary>
@@ -138,12 +178,37 @@ sealed class GameForm : Form, IHost
     }
 
     protected override void OnMouseMove(MouseEventArgs e) => screen.MouseMove(e);
-    protected override void OnMouseDown(MouseEventArgs e) => screen.MouseDown(e);
-    protected override void OnMouseUp(MouseEventArgs e) => screen.MouseUp(e);
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        // Capture keeps move events arriving after the pointer leaves the window.
+        if (e.Button == MouseButtons.Left) Capture = true;
+        screen.MouseDown(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        screen.MouseUp(e);
+        if (e.Button == MouseButtons.Left) Capture = false;
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (!Capture) screen.PointerCaptureLost();
+    }
+
     protected override void OnMouseWheel(MouseEventArgs e) => screen.MouseWheel(e);
 
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>
-        screen.KeyDown(keyData) || base.ProcessCmdKey(ref msg, keyData);
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if ((keyData & Keys.KeyCode) == Keys.F11)
+        {
+            ToggleFullscreen();
+            return true;
+        }
+        return screen.KeyDown(keyData) || base.ProcessCmdKey(ref msg, keyData);
+    }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
@@ -164,6 +229,13 @@ sealed class GameForm : Form, IHost
     }
 
     public void ShowShop() => screen = new ShopScreen(this);
+
+    public void ShowDress(string cueId)
+    {
+        var cue = CueCatalog.Get(cueId);
+        if (!Settings.Owns(cue)) { ShowShop(); return; }
+        screen = new DressScreen(this, cueId);
+    }
 
     public void Quit() => Close();
 }

@@ -13,7 +13,7 @@ public sealed class SnookerRules : GameRules
 
     public override GameMode Mode => GameMode.Snooker;
     public override string Name => "Snooker";
-    public override string Tagline => "Red, then a colour, on a 12-ft table. Fouls give 4+ points. Most points after the black wins.";
+    public override string Tagline => "Red, then a colour. A foul scores at least four. The higher total wins the frame.";
     public override int BallCount => 21;
     public override bool IsPointsGame => true;
     public override TableKind TableKind => TableKind.Snooker;
@@ -147,9 +147,9 @@ public sealed class SnookerRules : GameRules
 
         string? foul = null;
         if (ev.CueScratched) foul = "In-off";
-        else if (first < 0) foul = "Missed all balls";
-        else if (!IsLegalFirstContact(s, first, onTable)) foul = $"Hit the {ColourName(first)} first";
-        else if (pots.Any(n => !LegalPot(n))) foul = $"Potted the {ColourName(pots.First(n => !LegalPot(n)))}";
+        else if (first < 0) foul = "No ball contacted";
+        else if (!IsLegalFirstContact(s, first, onTable)) foul = $"Contacted the {ColourName(first)} first";
+        else if (pots.Any(n => !LegalPot(n))) foul = $"Illegally pocketed the {ColourName(pots.First(n => !LegalPot(n)))}";
 
         if (foul != null)
         {
@@ -160,7 +160,7 @@ public sealed class SnookerRules : GameRules
             opp.Score += penalty;
             o.Foul = true;
             o.FoulReason = foul;
-            o.Messages.Add($"FOUL — {foul} (+{penalty} to {opp.Name})");
+            o.Messages.Add($"FOUL. {foul}. {penalty} points to {opp.Name}.");
 
             bool blackWasLast = seq == Black;
             foreach (var n in pots.Where(IsColour)) Respot(s, n);
@@ -200,7 +200,7 @@ public sealed class SnookerRules : GameRules
             me.HighBreak = Math.Max(me.HighBreak, s.CurrentBreak);
             o.PointsScored = scored;
             o.TurnContinues = true;
-            o.Messages.Add(s.CurrentBreak >= 10 ? $"+{scored}  •  break {s.CurrentBreak}" : $"+{scored}");
+            o.Messages.Add(s.CurrentBreak >= 10 ? $"+{scored}. Break of {s.CurrentBreak}." : $"+{scored}.");
         }
         else
         {
@@ -223,14 +223,14 @@ public sealed class SnookerRules : GameRules
         {
             o.RackOver = true;
             o.Winner = a > b ? 0 : 1;
-            o.Messages.Add($"{s.Players[o.Winner].Name} wins the frame {Math.Max(a, b)}–{Math.Min(a, b)}");
+            o.Messages.Add($"{s.Players[o.Winner].Name} wins the frame, {Math.Max(a, b)}–{Math.Min(a, b)}.");
             return;
         }
         Respot(s, Black);
         o.TurnContinues = false;
         o.ForceBallInHand = true;
         o.ForceKitchen = true;
-        o.Messages.Add("Scores level — black re-spotted");
+        o.Messages.Add("Scores level. The black is re-spotted.");
     }
 
     protected override void Respot(GameState s, int number)
@@ -257,17 +257,17 @@ public sealed class SnookerRules : GameRules
     public override string Status(GameState s, int player)
     {
         var p = s.Players[player];
-        string txt = $"{p.Score} pts";
-        if (s.Current == player && s.CurrentBreak > 0) txt += $" • break {s.CurrentBreak}";
-        else if (p.HighBreak > 0) txt += $" • best {p.HighBreak}";
+        string txt = $"{p.Score}";
+        if (s.Current == player && s.CurrentBreak > 0) txt += $" · break {s.CurrentBreak}";
+        else if (p.HighBreak > 0) txt += $" · best {p.HighBreak}";
         return txt;
     }
 
     public override string Hint(GameState s)
     {
         string on = BallOn(s).ToUpperInvariant();
-        string txt = $"ON: {on}  •  {PointsRemaining(s)} left";
-        if (NeedsSnookers(s, s.Current)) txt += "  •  SNOOKERS NEEDED";
+        string txt = $"Ball on: {on}  ·  {PointsRemaining(s)} remaining";
+        if (NeedsSnookers(s, s.Current)) txt += "  ·  snookers required";
         return txt;
     }
 }

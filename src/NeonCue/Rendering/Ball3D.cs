@@ -94,6 +94,7 @@ sealed class BallRenderer : IDisposable
     readonly int[] cachedFrac = new int[MaxBalls];
     bool snooker;
     float radius = -1;
+    int spriteSize;
     TableStyle style;
 
     static readonly Vec3 Light = new Vec3(-0.32, -0.42, 0.85).Normalized();
@@ -118,13 +119,7 @@ sealed class BallRenderer : IDisposable
     /// </summary>
     public void Prepare(IReadOnlyList<(int n, Mat3 ori, int frac)> balls, float r)
     {
-        if (Math.Abs(r - radius) > 0.01f || style != Look.Style || snooker != Look.Snooker)
-        {
-            Dispose();
-            radius = r;
-            style = Look.Style;
-            snooker = Look.Snooker;
-        }
+        int size = Fit(r);
         // A turn smaller than about half a pixel at the rim is invisible: keep the cached sprite.
         double tol = 1.2 / Math.Max(4, r);
         var stale = new List<(int n, Mat3 ori, int frac)>();
@@ -132,7 +127,6 @@ sealed class BallRenderer : IDisposable
             if (cache[n] == null || !valid[n] || cachedFrac[n] != frac || !cachedOri[n].NearlyEquals(ori, tol)) stale.Add((n, ori, frac));
         if (stale.Count == 0) return;
 
-        int size = (int)Math.Ceiling(r * 2) + 3;
         EnsureGlyphs();
         var canvases = new PixelCanvas[stale.Count];
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -145,8 +139,7 @@ sealed class BallRenderer : IDisposable
         {
             var (n, ori, frac) = stale[i];
             cachedFrac[n] = frac;
-            cache[n] ??= new Bitmap(size, size, PixelFormat.Format32bppPArgb);
-            canvases[i].CopyTo(cache[n]!);
+            canvases[i].CopyTo(BitmapFor(n, size));
             cachedOri[n] = ori;
             valid[n] = true;
         }
@@ -156,19 +149,11 @@ sealed class BallRenderer : IDisposable
 
     public Bitmap Get(int n, Mat3 ori, float r)
     {
-        if (Math.Abs(r - radius) > 0.01f || style != Look.Style || snooker != Look.Snooker)
-        {
-            Dispose();
-            radius = r;
-            style = Look.Style;
-            snooker = Look.Snooker;
-        }
+        int size = Fit(r);
         var bmp = cache[n];
-        if (bmp != null && valid[n] && cachedOri[n].NearlyEquals(ori)) return bmp;
+        if (bmp != null && bmp.Width == size && valid[n] && cachedOri[n].NearlyEquals(ori)) return bmp;
 
-        int size = (int)Math.Ceiling(r * 2) + 2;
-        bmp ??= new Bitmap(size, size, PixelFormat.Format32bppPArgb);
-        cache[n] = bmp;
+        bmp = BitmapFor(n, size);
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         var canvas = new PixelCanvas(size, size);
         Render(canvas, n, ori, r);
@@ -176,7 +161,41 @@ sealed class BallRenderer : IDisposable
         RenderMs += (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         Renders++;
         cachedOri[n] = ori;
+        cachedFrac[n] = 0;
         valid[n] = true;
+        return bmp;
+    }
+
+    /// <summary>
+    /// Pixel size of a ball sprite. A one-pixel resize stays inside the radius tolerance in
+    /// <see cref="Fit"/>, but <c>ceil(2r)</c> can still grow. LockBits rejects that larger
+    /// buffer with "Parameter is not valid", so the cached bitmap is dropped when this size changes.
+    /// </summary>
+    static int SpriteSize(float r) => Math.Max(1, (int)Math.Ceiling(r * 2f) + 3);
+
+    int Fit(float r)
+    {
+        int size = SpriteSize(r);
+        if (spriteSize != size || Math.Abs(r - radius) > 0.01f || style != Look.Style || snooker != Look.Snooker)
+        {
+            Dispose();
+            radius = r;
+            spriteSize = size;
+            style = Look.Style;
+            snooker = Look.Snooker;
+        }
+        return size;
+    }
+
+    Bitmap BitmapFor(int n, int size)
+    {
+        var bmp = cache[n];
+        if (bmp != null && bmp.Width == size && bmp.Height == size && bmp.PixelFormat == PixelFormat.Format32bppPArgb)
+            return bmp;
+        bmp?.Dispose();
+        bmp = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+        cache[n] = bmp;
+        valid[n] = false;
         return bmp;
     }
 

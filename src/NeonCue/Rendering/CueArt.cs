@@ -16,11 +16,11 @@ static class CueArt
     };
 
     /// <param name="unit">Size of one "pixel" in the current coordinate system (glow widths scale with it).</param>
-    public static void Draw(Graphics g, PointF tip, PointF butt, float tipHalf, float buttHalf, CueSpec spec, double time, float unit, bool shadow = true)
+    public static void Draw(Graphics g, PointF tip, PointF butt, float tipHalf, float buttHalf, CueSpec spec, double time, float unit, bool shadow = true, CueDress? dress = null)
     {
         if (Look.Realistic)
         {
-            RealCue.Draw(g, tip, butt, buttHalf, spec, time, unit, shadow);
+            RealCue.Draw(g, tip, butt, buttHalf, spec, time, unit, shadow, dress);
             return;
         }
         float dx = butt.X - tip.X, dy = butt.Y - tip.Y;
@@ -53,6 +53,20 @@ static class CueArt
                 Positions = [0f, 0.012f, 0.03f, 0.045f, 0.57f, 0.59f, 0.63f, 0.66f, 0.79f, 0.81f, 0.83f, 1f],
             };
             g.FillPolygon(lg, pts);
+        }
+
+        if (dress != null && !dress.IsBlank)
+        {
+            using var mark = new SolidBrush(Theme.Hex(spec.Accent));
+            void Band(float f)
+            {
+                float cx = tip.X + dx * f, cy = tip.Y + dy * f;
+                float hw = tipHalf + (buttHalf - tipHalf) * f;
+                g.FillRectangle(mark, cx - 1.2f * unit, cy - hw, 2.4f * unit, hw * 2);
+            }
+            if (dress.Forearm.Length > 0) Band(0.62f);
+            if (dress.WrapMark.Length > 0) Band(0.8f);
+            if (dress.Sleeve.Length > 0) Band(0.92f);
         }
 
         // Gold / diamond rings on the butt of high-tier cues.

@@ -48,6 +48,17 @@ static class Snapshot
             }
             if (Environment.GetEnvironmentVariable("NEONCUE_STATS") == "1") ((GameScreen)screen).DebugShowStats();
         }
+        else if (what == "dress")
+        {
+            host.Settings.OwnedCues = ["house", "silk"];
+            host.Settings.EquippedCue = "silk";
+            host.Settings.Looks["silk"] = new NeonCue.Rendering.CueDress
+            {
+                Forearm = "crest", WrapMark = "wave", Sleeve = "star",
+                Trim = "gold", Finish = "glow", Charm = "charmstar", Signature = "LEER",
+            };
+            screen = new DressScreen(host, "silk");
+        }
         else if (what == "shop")
         {
             host.Settings.Coins = 14250;
@@ -60,6 +71,11 @@ static class Snapshot
         {
             host.Settings.Mode = GameMode.Snooker;
             screen = new GameScreen(host);
+        }
+        else if (what == "help")
+        {
+            screen = new MenuScreen(host);
+            screen.KeyDown(Keys.F1);
         }
         else screen = new MenuScreen(host);
 

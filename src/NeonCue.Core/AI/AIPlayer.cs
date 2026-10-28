@@ -49,13 +49,13 @@ public static class AIPlayer
             PositionWeight: 0, Safety: false, SafetySweep: 0, Banks: false, Combos: false,
             RobustSamples: 0, AngleNoiseDeg: 1.2, PowerNoise: 0.09, PickTop: 3, Placements: 2),
         AILevel.Amateur => new AIProfile(
-            Candidates: 5, PowerMuls: [0.9, 1.15, 1.5], Spins: [(0, 0), (0, 0.5), (0, -0.5)],
-            PositionWeight: 0.35, Safety: false, SafetySweep: 0, Banks: false, Combos: false,
-            RobustSamples: 0, AngleNoiseDeg: 0.65, PowerNoise: 0.05, PickTop: 2, Placements: 4),
+            Candidates: 6, PowerMuls: [0.85, 1.05, 1.35], Spins: [(0, 0), (0, 0.45), (0, -0.4)],
+            PositionWeight: 0.55, Safety: true, SafetySweep: 0, Banks: true, Combos: true,
+            RobustSamples: 2, AngleNoiseDeg: 0.48, PowerNoise: 0.04, PickTop: 2, Placements: 4),
         AILevel.Pro => new AIProfile(
-            Candidates: 10, PowerMuls: [0.8, 1.0, 1.25, 1.6], Spins: [(0, 0), (0, 0.6), (0, -0.6), (0.45, 0), (-0.45, 0)],
-            PositionWeight: 0.8, Safety: true, SafetySweep: 0, Banks: true, Combos: true,
-            RobustSamples: 4, AngleNoiseDeg: 0.25, PowerNoise: 0.025, PickTop: 1, Placements: 6),
+            Candidates: 10, PowerMuls: [0.8, 1.0, 1.25, 1.6], Spins: [(0, 0), (0, 0.55), (0, -0.55), (0.4, 0.2), (-0.4, 0.2)],
+            PositionWeight: 0.85, Safety: true, SafetySweep: 24, Banks: true, Combos: true,
+            RobustSamples: 6, AngleNoiseDeg: 0.18, PowerNoise: 0.02, PickTop: 1, Placements: 6),
         _ => new AIProfile(
             Candidates: 16, PowerMuls: [0.7, 0.85, 1.0, 1.2, 1.45, 1.8],
             Spins: [(0, 0), (0, 0.45), (0, 0.9), (0, -0.45), (0, -0.9), (0.5, 0.3), (-0.5, 0.3), (0.5, -0.4), (-0.5, -0.4)],
@@ -320,8 +320,7 @@ public static class AIPlayer
         out Vec2 ghost, out double cosCut, out double d1, out double d2)
     {
         ghost = Vec2.Zero; cosCut = 0; d1 = 0; d2 = 0;
-        // A ball already hanging in the jaws is pushed into the hole, not at the mouth.
-        Vec2 aim = Vec2.Distance(t.Pos, p.Aim) < 3 * R ? p.Center : p.Aim;
+        if (!PocketEntry.TryGet(p, t.Pos, out Vec2 aim)) return 0;
         Vec2 tp = aim - t.Pos;
         d2 = tp.Length;
         if (d2 < 1) return 0;
@@ -371,7 +370,7 @@ public static class AIPlayer
                     double q = DirectQuality(s, cue, 0, t, p, out var g, out var cc, out var d1, out var d2);
                     if (q > 0)
                     {
-                        Vec2 aim = Vec2.Distance(t.Pos, p.Aim) < 3 * R ? p.Center : p.Aim;
+                        PocketEntry.TryGet(p, t.Pos, out Vec2 aim);
                         list.Add(new Candidate((g - cue).Angle, EstimatePower(d1, d2, cc), q, $"{t.Number} in the {p.Name}", t.Number, aim));
                     }
                     if (prof.Banks) AddBanks(s, cue, t, p, list);
@@ -416,15 +415,16 @@ public static class AIPlayer
     static void AddBanks(GameState s, Vec2 cue, Ball t, Pocket p, List<Candidate> list)
     {
         const double W = Table.Width, H = Table.Height;
+        if (!PocketEntry.TryGet(p, t.Pos, out Vec2 hole)) return;
         for (int rail = 0; rail < 4; rail++)
         {
             Vec2 m;
             switch (rail)
             {
-                case 0: if (p.Aim.Y < H / 2) continue; m = new Vec2(p.Aim.X, 2 * R - p.Aim.Y); break;
-                case 1: if (p.Aim.Y > H / 2) continue; m = new Vec2(p.Aim.X, 2 * (H - R) - p.Aim.Y); break;
-                case 2: if (p.Aim.X < W * 0.1) continue; m = new Vec2(2 * R - p.Aim.X, p.Aim.Y); break;
-                default: if (p.Aim.X > W * 0.9) continue; m = new Vec2(2 * (W - R) - p.Aim.X, p.Aim.Y); break;
+                case 0: if (hole.Y < H / 2) continue; m = new Vec2(hole.X, 2 * R - hole.Y); break;
+                case 1: if (hole.Y > H / 2) continue; m = new Vec2(hole.X, 2 * (H - R) - hole.Y); break;
+                case 2: if (hole.X < W * 0.1) continue; m = new Vec2(2 * R - hole.X, hole.Y); break;
+                default: if (hole.X > W * 0.9) continue; m = new Vec2(2 * (W - R) - hole.X, hole.Y); break;
             }
 
             Vec2 dir = (m - t.Pos).Normalized();
@@ -452,9 +452,9 @@ public static class AIPlayer
             if (d1 < 1) continue;
             double cc = Vec2.Dot(cg / d1, dir);
             if (cc < 0.45) continue;
-            if (!PathClear(s, cue, g, 0, t.Number) || !PathClear(s, t.Pos, bounce, t.Number, 0) || !PathClear(s, bounce, p.Aim, t.Number, 0)) continue;
+            if (!PathClear(s, cue, g, 0, t.Number) || !PathClear(s, t.Pos, bounce, t.Number, 0) || !PathClear(s, bounce, hole, t.Number, 0)) continue;
 
-            double dist = k + Vec2.Distance(bounce, p.Aim);
+            double dist = k + Vec2.Distance(bounce, hole);
             double q = Math.Pow(cc, 1.6) * Math.Exp(-(d1 * 0.6 + dist) / 1100.0) * 0.45;
             list.Add(new Candidate(cg.Angle, EstimatePower(d1, dist * 1.3 + 60, cc), q, $"Bank {t.Number} in the {p.Name}", t.Number, m));
         }

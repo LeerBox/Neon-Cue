@@ -107,7 +107,10 @@ Headless benchmark (`tests/NeonCue.Sim`, CPU vs CPU), share of non-break shots t
 | Cue shop (from the menu) | C |
 | Aim guide / fast forward / sound | G / F / M |
 | Scoreboard | Tab |
+| Take back the last shot | Backspace (or Ctrl+Z). Up to eight of your shots; the opponent's reply goes with them |
+| Move balls (Practice) | Right-click a ball, move it, click to place. Right-click again to put it back |
 | Pause menu | Esc |
+| Fullscreen | F11 |
 
 ## Build and run
 
@@ -134,6 +137,12 @@ src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe --playtest report.txt 100
 ```
 
 A scripted player drives the real game screen with mouse and keyboard input, behaving like a human hand: it points a few pixels off, pauses on the target, takes a wobbly path to the cue ball, and fine-tunes with the arrow keys. It plays hundreds of set-up pots (close and long shots, with and without spin, with ball in hand) and compares the result with a perfect stroke along the aim guide. CI fails if a perfect cue sinks fewer than 90% of the pots the guide promises. See [docs/playtest-report.txt](docs/playtest-report.txt) for the latest report.
+
+```bash
+dotnet run --project src/NeonCue -c Release -- --undo-check
+```
+
+Checks that Backspace puts the table, score and coins back, that Practice can move a ball, and that a real match cannot.
 
 ### AI and physics test bench
 

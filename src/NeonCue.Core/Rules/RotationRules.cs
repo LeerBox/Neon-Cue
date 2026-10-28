@@ -18,7 +18,7 @@ public abstract class LowestBallFirstRules : GameRules
     public override string Hint(GameState s)
     {
         int t = s.LowestOnTable();
-        return t > 0 ? $"Hit the {t}-ball first" : "";
+        return t > 0 ? $"The {t}-ball is first" : "";
     }
 }
 
@@ -46,20 +46,20 @@ public abstract class MoneyBallRules : LowestBallFirstRules
             {
                 o.RackOver = true;
                 o.Winner = s.Current;
-                o.Messages.Add($"{me.Name} sinks the {MoneyBall}!");
+                o.Messages.Add($"{me.Name} sinks the {MoneyBall}-ball.");
                 return o;
             }
             Respot(s, MoneyBall);
-            o.Messages.Add($"{MoneyBall}-ball respotted");
+            o.Messages.Add($"The {MoneyBall}-ball is respotted.");
         }
 
         if (foul != null)
         {
             o.Foul = true;
             o.FoulReason = foul;
-            o.Messages.Add($"FOUL — {foul}");
+            o.Messages.Add($"FOUL. {foul}");
             if (s.PlayerCount > 1 && me.ConsecutiveFouls == 1)
-                o.Messages.Add($"{me.Name} is on two fouls");
+                o.Messages.Add($"{me.Name} has two consecutive fouls");
         }
         else
         {
@@ -71,7 +71,7 @@ public abstract class MoneyBallRules : LowestBallFirstRules
     public override string Status(GameState s, int player)
     {
         int f = s.Players[player].ConsecutiveFouls;
-        return f > 0 ? $"{f} foul{(f > 1 ? "s" : "")} in a row" : "Lowest ball first";
+        return f > 0 ? $"{f} consecutive foul{(f > 1 ? "s" : "")}" : "Lowest ball first";
     }
 }
 
@@ -79,7 +79,7 @@ public sealed class NineBallRules : MoneyBallRules
 {
     public override GameMode Mode => GameMode.NineBall;
     public override string Name => "9-Ball";
-    public override string Tagline => "Always hit the lowest ball first. Pocket the 9 at any time to win.";
+    public override string Tagline => "Contact the lowest ball first. A legal 9-ball wins the rack.";
     public override int BallCount => 9;
     protected override int MoneyBall => 9;
     protected override bool EarlyMoneyBallWins => true;
@@ -101,7 +101,7 @@ public sealed class TenBallRules : MoneyBallRules
 {
     public override GameMode Mode => GameMode.TenBall;
     public override string Name => "10-Ball";
-    public override string Tagline => "Lowest ball first. The 10 only wins as the last ball — early 10s are respotted.";
+    public override string Tagline => "Contact the lowest ball first. The 10-ball wins only as the last ball.";
     public override int BallCount => 10;
     protected override int MoneyBall => 10;
     protected override bool EarlyMoneyBallWins => false;
@@ -124,7 +124,7 @@ public sealed class Rotation61Rules : LowestBallFirstRules
 {
     public override GameMode Mode => GameMode.Rotation;
     public override string Name => "Rotation 61";
-    public override string Tagline => "Lowest ball first. Each ball is worth its number — first to 61 points wins.";
+    public override string Tagline => "Contact the lowest ball first. Each ball scores its number. First to 61.";
     public override bool UsesRaceTo => false;
     public override bool IsPointsGame => true;
 
@@ -153,9 +153,9 @@ public sealed class Rotation61Rules : LowestBallFirstRules
         {
             o.Foul = true;
             o.FoulReason = foul;
-            o.Messages.Add($"FOUL — {foul}");
+            o.Messages.Add($"FOUL. {foul}");
             foreach (var n in objs.OrderBy(n => n)) Respot(s, n);
-            if (objs.Count > 0) o.Messages.Add("Pocketed balls respotted");
+            if (objs.Count > 0) o.Messages.Add("Pocketed balls are respotted.");
         }
         else
         {
@@ -163,7 +163,7 @@ public sealed class Rotation61Rules : LowestBallFirstRules
             me.Score += pts;
             o.PointsScored = pts;
             o.TurnContinues = objs.Count > 0;
-            if (pts > 0) o.Messages.Add($"+{pts} points");
+            if (pts > 0) o.Messages.Add($"+{pts} points.");
         }
 
         int target = s.TargetScore;
@@ -171,13 +171,13 @@ public sealed class Rotation61Rules : LowestBallFirstRules
         {
             o.RackOver = true;
             o.Winner = s.Current;
-            o.Messages.Add($"{me.Name} reaches {target}!");
+            o.Messages.Add($"{me.Name} reaches {target}.");
         }
         else if (!s.ObjectBallsOnTable.Any())
         {
             o.RackOver = true;
             o.Winner = s.Players[0].Score >= s.Players[s.PlayerCount - 1].Score ? 0 : s.PlayerCount - 1;
-            o.Messages.Add("Table cleared!");
+            o.Messages.Add("The table is clear.");
         }
         return o;
     }

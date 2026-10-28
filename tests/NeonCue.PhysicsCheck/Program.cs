@@ -58,12 +58,13 @@ Vec2 Mid = new(Table.Width / 2, Table.Height / 2);
     var ev = new ShotEvents();
     while (o.Vel.LengthSq == 0 && c.IsMoving) Physics.Step(balls, ev, null);
     double contactX = c.Pos.X, minX = contactX, maxX = contactX;
-    while (Physics.Step(balls, ev, null)) { minX = Math.Min(minX, c.Pos.X); maxX = Math.Max(maxX, c.Pos.X); }
+    // Stop if the object ball comes back off a cushion and hits the cue ball again.
+    while (o.Vel.X >= 0 && Physics.Step(balls, ev, null)) { minX = Math.Min(minX, c.Pos.X); maxX = Math.Max(maxX, c.Pos.X); }
     return (contactX - minX, maxX - contactX);
 }
 var drawn = AfterContact(-1);
 var followed = AfterContact(1);
-var stunned = AfterContact(0, gap: 8); // still sliding with no spin at impact
+var stunned = AfterContact(0, gap: 8);
 Check("Draw (bottom spin): cue ball comes back (units)", drawn.back, 40, 2000, "units");
 Check("Follow (top spin): cue ball runs through (units)", followed.on, 40, 2000, "units");
 Check("Stun (centre ball, sliding): cue ball stays near contact (units)", Math.Max(stunned.back, stunned.on), 0, 15, "units");
@@ -128,6 +129,87 @@ double plain = Rebound(0), right = Rebound(0.8), left = Rebound(-0.8);
 Check("Cushion rebound angle, no spin (mirror = 45)", plain, 36, 50, "deg");
 Check("Right english runs the ball more to the right (smaller angle)", plain - right, 2, 40, "deg");
 Check("Left english checks the ball (larger angle)", left - plain, 2, 40, "deg");
+
+// Follow opens the rebound; draw closes it. Same 45° path into the top cushion.
+double ReboundTop(double top)
+{
+    var c = Cue(new Vec2(500, 300));
+    Physics.Strike(c, -Math.PI / 4, 0.45, 0, top);
+    var balls = new[] { c };
+    var ev = new ShotEvents();
+    while (c.Vel.Y < 0 && c.IsMoving) Physics.Step(balls, ev, null);
+    return Deg(Math.Atan2(c.Vel.Y, c.Vel.X));
+}
+double followRail = ReboundTop(0.9), drawRail = ReboundTop(-0.9);
+Check("Follow opens the cushion rebound more than draw", followRail - drawRail, 1, 40, "deg");
+
+{
+    var soft = Cue(new Vec2(200, 250));
+    var hard = Cue(new Vec2(200, 250));
+    Physics.Strike(soft, 0, 0.5, 0, 0);
+    Physics.Strike(hard, 0, 1, 0, 0);
+    Check("Half stroke launches at half the full-stroke speed", soft.Vel.Length / hard.Vel.Length, 0.48, 0.52, "");
+}
+
+// Combination: ball 2 sits on the pocket line. Ball 1 is struck straight into it.
+// Ball 2 must be the one that falls. Ball 1 must stay on the table.
+{
+    var pocket = Table.Pockets.First(p => p.Name == "bottom-right corner");
+    Vec2 away = pocket.Inward; // from the pocket, back onto the bed
+    Vec2 target = pocket.Aim;
+    Vec2 striker = target + away * (2 * R + 6);
+    var a = Obj(1, striker);
+    var b = Obj(2, target);
+    double speed = Physics.SpeedFraction(0.45) * Physics.MaxShotSpeed;
+    a.Vel = away * -speed;
+    var ev = Physics.Simulate([a, b]);
+    bool strikerIn = ev.Pocketed.Contains(1);
+    bool targetIn = ev.Pocketed.Contains(2);
+    Check("Combination: the ball at the pocket is the one that falls", targetIn && !strikerIn ? 1 : 0, 1, 1, "");
+
+    double yRail = Table.Height - R;
+    double jawX = Table.Width - Table.CornerGap;
+    Vec2 railSit = new(jawX - 0.5 * R, yRail);
+    Vec2 railHit = new(railSit.X - 2 * R - 10, yRail);
+    var railA = Obj(1, railHit);
+    var railB = Obj(2, railSit);
+    railA.Vel = new Vec2(speed, 0);
+    var railEv = Physics.Simulate([railA, railB]);
+    Check("Rail combination: the ball on the jaw falls, the striker stays out",
+        railEv.Pocketed.Contains(2) && !railEv.Pocketed.Contains(1) ? 1 : 0, 1, 1, "");
+
+    // Centres have already crossed, but the striker is still moving through. The contact was
+    // missed; the object ball must leave with the momentum and the striker must not keep it.
+    var passed = Obj(1, new Vec2(500 + 2 * R - 3, 250));
+    var sat = Obj(2, new Vec2(500, 250));
+    passed.Vel = new Vec2(speed, 0);
+    double before = passed.Vel.X;
+    var evPass = new ShotEvents();
+    var pair = new[] { passed, sat };
+    for (int i = 0; i < 3; i++) Physics.Step(pair, evPass, null);
+    Check("Passed-through contact: object ball takes the speed", sat.Vel.X > before * 0.4 && passed.Vel.X < before * 0.5 ? 1 : 0, 1, 1, "");
+}
+
+// A ball sent at the calculated entry point must fall, including from awkward angles.
+{
+    var rng = new Random(11);
+    int tried = 0, made = 0;
+    for (int n = 0; n < 36; n++)
+    {
+        var pocket = Table.Pockets[n % Table.Pockets.Length];
+        var from = new Vec2(90 + rng.NextDouble() * (Table.Width - 180), 70 + rng.NextDouble() * (Table.Height - 140));
+        if (!PocketEntry.TryGet(pocket, from, out Vec2 aim)) continue;
+        Vec2 dir = (aim - from).Normalized();
+        double approach = Math.Acos(Math.Clamp(Vec2.Dot(dir, -pocket.Inward), -1, 1));
+        if (approach > 1.05) continue;
+        tried++;
+        var ball = new Ball(1, from);
+        ball.Vel = dir * Physics.SpeedToTravel(Vec2.Distance(from, aim) + 80);
+        var ev = Physics.Simulate([ball]);
+        if (ev.Pocketed.Contains(1)) made++;
+    }
+    Check("Pocket entry clears the jaws", tried == 0 ? 0 : made / (double)tried, 0.9, 1.01, "");
+}
 
 // 8. Energy never increases during a full-power break.
 {

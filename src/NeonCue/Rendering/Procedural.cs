@@ -128,6 +128,9 @@ sealed class PixelCanvas
 
     public void CopyTo(Bitmap bmp)
     {
+        if (bmp.Width != Width || bmp.Height != Height || bmp.PixelFormat != PixelFormat.Format32bppPArgb)
+            throw new ArgumentException(
+                $"The image is {bmp.Width}x{bmp.Height} {bmp.PixelFormat}. The pixel buffer is {Width}x{Height} 32-bit premultiplied.");
         var data = bmp.LockBits(new Rectangle(0, 0, Width, Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
         try
         {

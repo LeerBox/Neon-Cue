@@ -31,6 +31,21 @@ jobs:
           $p = Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--playtest','playtest.txt','40' -Wait -PassThru
           Get-Content playtest.txt
           exit $p.ExitCode
+      - name: Take-back and practice placement
+        shell: pwsh
+        run: |
+          $p = Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--undo-check' -Wait -PassThru
+          exit $p.ExitCode
+      - name: Aim follows the pointer exactly
+        shell: pwsh
+        run: |
+          $p = Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--aim-check' -Wait -PassThru
+          exit $p.ExitCode
+      - name: Cue drawing at every angle (GDI+)
+        shell: pwsh
+        run: |
+          $p = Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--gdi-check' -Wait -PassThru
+          exit $p.ExitCode
       - name: Frame benchmark (smoothness)
         shell: pwsh
         run: |
@@ -41,7 +56,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force shots | Out-Null
-          foreach ($m in 'snooker','watchsnooker','game','menu','shop') {
+          foreach ($m in 'snooker','watchsnooker','game','menu','shop','dress','help') {
             Start-Process src/NeonCue/bin/Release/net8.0-windows/NeonCue.exe -ArgumentList '--render',"shots/$m.png",$m -Wait
           }
           $env:NEONCUE_STATS = '1'

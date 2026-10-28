@@ -201,19 +201,24 @@ static class Gfx
         g.FillPath(br, path);
     }
 
+    static RectangleF PixelRect(RectangleF rect) =>
+        new(MathF.Round(rect.X), MathF.Round(rect.Y), MathF.Max(1, MathF.Round(rect.Width)), MathF.Max(1, MathF.Round(rect.Height)));
+
     public static void Text(Graphics g, string text, Font font, Color color, RectangleF rect,
         StringAlignment h = StringAlignment.Near, StringAlignment v = StringAlignment.Center)
     {
-        using var sf = new StringFormat { Alignment = h, LineAlignment = v, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        using var crisp = new Ui.CrispText(g);
+        using var sf = new StringFormat { Alignment = h, LineAlignment = v, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip };
         using var br = new SolidBrush(color);
-        g.DrawString(text, font, br, rect, sf);
+        g.DrawString(text, font, br, PixelRect(rect), sf);
     }
 
     public static void WrappedText(Graphics g, string text, Font font, Color color, RectangleF rect, StringAlignment h = StringAlignment.Near)
     {
-        using var sf = new StringFormat { Alignment = h, LineAlignment = StringAlignment.Near };
+        using var crisp = new Ui.CrispText(g);
+        using var sf = new StringFormat { Alignment = h, LineAlignment = StringAlignment.Near, FormatFlags = StringFormatFlags.NoClip };
         using var br = new SolidBrush(color);
-        g.DrawString(text, font, br, rect, sf);
+        g.DrawString(text, font, br, PixelRect(rect), sf);
     }
 
     public static void Triangle(Graphics g, PointF center, float size, bool right, Color c)

@@ -4,7 +4,7 @@ public sealed class EightBallRules : GameRules
 {
     public override GameMode Mode => GameMode.EightBall;
     public override string Name => "8-Ball";
-    public override string Tagline => "Claim solids or stripes, clear your group, then sink the 8 to win.";
+    public override string Tagline => "Choose a group, clear it, then legally pocket the 8-ball.";
     public override bool BreakScratchToKitchen => true;
 
     static bool InGroup(int n, Group g) => g switch
@@ -66,7 +66,7 @@ public sealed class EightBallRules : GameRules
             if (isBreak)
             {
                 Respot(s, 8);
-                o.Messages.Add("8-ball on the break — respotted");
+                o.Messages.Add("8-ball on the break. It is respotted.");
             }
             else
             {
@@ -75,14 +75,14 @@ public sealed class EightBallRules : GameRules
                 if (foul == null && cleared)
                 {
                     o.Winner = s.Current;
-                    o.Messages.Add($"{me.Name} sinks the 8!");
+                    o.Messages.Add($"{me.Name} sinks the 8-ball.");
                 }
                 else
                 {
                     o.Winner = s.Opponent;
                     o.Foul = foul != null;
                     o.FoulReason = foul;
-                    o.Messages.Add(foul != null ? $"FOUL on the 8 — {foul}" : "8-ball pocketed early!");
+                    o.Messages.Add(foul != null ? $"FOUL on the 8-ball. {foul}" : "8-ball pocketed early. The rack is lost.");
                 }
                 return o;
             }
@@ -92,7 +92,7 @@ public sealed class EightBallRules : GameRules
         {
             o.Foul = true;
             o.FoulReason = foul;
-            o.Messages.Add($"FOUL — {foul}");
+            o.Messages.Add($"FOUL. {foul}");
         }
 
         if (!isBreak && foul == null && s.TableOpen)
@@ -103,7 +103,7 @@ public sealed class EightBallRules : GameRules
                 me.Group = first < 8 ? Group.Solids : Group.Stripes;
                 opp.Group = me.Group == Group.Solids ? Group.Stripes : Group.Solids;
                 s.TableOpen = false;
-                o.Messages.Add($"{me.Name} is {me.Group.ToString().ToUpperInvariant()}");
+                o.Messages.Add($"{me.Name} is {me.Group.ToString().ToUpperInvariant()}.");
             }
         }
 
@@ -118,9 +118,9 @@ public sealed class EightBallRules : GameRules
     public override string Status(GameState s, int player)
     {
         var p = s.Players[player];
-        if (s.TableOpen || p.Group == Group.None) return "Open table";
+        if (s.TableOpen || p.Group == Group.None) return "Table open";
         int left = GroupBalls(p.Group).Count(n => !s.Balls[n].Pocketed);
-        return left == 0 ? $"{p.Group} • on the 8" : $"{p.Group} • {left} left";
+        return left == 0 ? $"{p.Group} · 8-ball" : $"{p.Group} · {left} remaining";
     }
 
     public override IReadOnlyList<int> PlayerBalls(GameState s, int player)
@@ -133,5 +133,5 @@ public sealed class EightBallRules : GameRules
     }
 
     public override string Hint(GameState s) =>
-        s.TableOpen ? "Open table — any ball except the 8" : $"Shoot your {s.CurrentPlayer.Group.ToString().ToLowerInvariant()}";
+        s.TableOpen ? "Table open. Any object ball except the 8-ball" : $"{s.CurrentPlayer.Group} to play";
 }

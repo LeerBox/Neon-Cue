@@ -217,7 +217,7 @@ public abstract class GameRules
         {
             o.RackOver = true;
             o.Winner = s.Opponent;
-            o.Messages.Add($"Three fouls in a row — {shooter.Name} loses the rack");
+            o.Messages.Add($"Three consecutive fouls. {shooter.Name} loses the rack");
         }
 
         if (o.RackOver)
@@ -239,18 +239,18 @@ public abstract class GameRules
     /// <summary>Fouls common to most pool games. Returns null when the shot is legal.</summary>
     protected string? StandardFoul(GameState s, ShotEvents ev, Func<int, bool> onTable, bool isBreak)
     {
-        if (ev.CueScratched) return "Scratch";
-        if (ev.FirstContact < 0) return "No ball hit";
+        if (ev.CueScratched) return "Cue ball pocketed";
+        if (ev.FirstContact < 0) return "No ball contacted";
         if ((!isBreak || RequireLegalFirstContactOnBreak) && !IsLegalFirstContact(s, ev.FirstContact, onTable))
-            return $"Wrong ball first ({ev.FirstContact}-ball)";
+            return $"Wrong ball first ({ev.FirstContact})";
         bool potted = ev.PocketedObjects.Any();
         if (isBreak)
         {
-            if (!potted && ev.RailBalls.Count < 4) return "Weak break — 4 balls must reach a rail";
+            if (!potted && ev.RailBalls.Count < 4) return "Illegal break. Four object balls must reach a cushion";
         }
         else if (!potted && !ev.RailAfterContact)
         {
-            return "No rail after contact";
+            return "No cushion after contact";
         }
         return null;
     }

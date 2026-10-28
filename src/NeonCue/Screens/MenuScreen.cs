@@ -51,20 +51,14 @@ sealed class MenuScreen : IScreen
         {
             Label = "OPPONENT",
             Value = () => cfg.Mode == GameMode.Practice
-                ? (cfg.Opponent == OpponentType.CpuVsCpu ? "Watch the CPU" : "Solo")
-                : cfg.Opponent switch { OpponentType.Cpu => "You vs CPU", OpponentType.TwoPlayer => "2 Players (local)", _ => "CPU vs CPU" },
+                ? (cfg.Opponent == OpponentType.CpuVsCpu ? "Exhibition" : "Solo practice")
+                : cfg.Opponent switch { OpponentType.Cpu => "Versus computer", OpponentType.TwoPlayer => "Two players", _ => "Exhibition" },
             Change = d => cfg.Opponent = (OpponentType)(((int)cfg.Opponent + d + 3) % 3),
         });
         rows.Add(new Row
         {
-            Label = "CPU LEVEL",
-            Value = () => cfg.Level switch
-            {
-                AILevel.Rookie => "Rookie",
-                AILevel.Amateur => "Amateur",
-                AILevel.Pro => "Pro",
-                _ => "Master",
-            },
+            Label = "SKILL",
+            Value = () => AppSettings.SkillName(cfg.Level),
             Change = d => cfg.Level = (AILevel)(((int)cfg.Level + d + 4) % 4),
             Enabled = () => cfg.Opponent != OpponentType.TwoPlayer || cfg.Mode == GameMode.Practice,
         });
@@ -73,11 +67,11 @@ sealed class MenuScreen : IScreen
             Label = "MATCH",
             Value = () => cfg.Mode switch
             {
-                GameMode.StraightPool => $"First to {cfg.TargetScore}",
-                GameMode.Rotation => "First to 61",
-                GameMode.Practice => "Endless",
-                GameMode.Snooker => cfg.RaceTo == 1 ? "Single frame" : $"Best of {2 * cfg.RaceTo - 1} frames",
-                _ => cfg.RaceTo == 1 ? "Single rack" : $"Race to {cfg.RaceTo}",
+                GameMode.StraightPool => $"To {cfg.TargetScore} points",
+                GameMode.Rotation => "To 61 points",
+                GameMode.Practice => "Open session",
+                GameMode.Snooker => cfg.RaceTo == 1 ? "One frame" : $"Best of {2 * cfg.RaceTo - 1}",
+                _ => cfg.RaceTo == 1 ? "One rack" : $"Race to {cfg.RaceTo}",
             },
             Change = d =>
             {
@@ -89,19 +83,19 @@ sealed class MenuScreen : IScreen
         rows.Add(new Row
         {
             Label = "AIM GUIDE",
-            Value = () => cfg.Guide switch { AimGuide.Off => "Off (pro)", AimGuide.GhostBall => "Ghost ball", _ => "Full prediction" },
+            Value = () => cfg.Guide switch { AimGuide.Off => "Off", AimGuide.GhostBall => "Ghost ball", _ => "Full path" },
             Change = d => cfg.Guide = (AimGuide)(((int)cfg.Guide + d + 3) % 3),
         });
         rows.Add(new Row
         {
             Label = "AIM ASSIST",
-            Value = () => cfg.Assist switch { AimAssist.Off => "Off (free aim)", AimAssist.Light => "Light", _ => "Strong" },
+            Value = () => cfg.Assist switch { AimAssist.Off => "Off", AimAssist.Light => "Standard", _ => "Strong" },
             Change = d => cfg.Assist = (AimAssist)(((int)cfg.Assist + d + 3) % 3),
         });
         rows.Add(new Row
         {
             Label = "STROKE ERROR",
-            Value = () => cfg.StrokeError ? "Realistic (cue wobble)" : "Off (exact)",
+            Value = () => cfg.StrokeError ? "Natural" : "Exact",
             Change = _ => cfg.StrokeError = !cfg.StrokeError,
         });
         rows.Add(new Row
@@ -122,8 +116,8 @@ sealed class MenuScreen : IScreen
         });
 
         buttons.Add(new UiButton { Text = "PLAY", Primary = true, OnClick = Play });
-        buttons.Add(new UiButton { Text = "CUE SHOP", OnClick = host.ShowShop });
-        buttons.Add(new UiButton { Text = "HOW TO PLAY", OnClick = () => showHelp = true });
+        buttons.Add(new UiButton { Text = "CUES", OnClick = host.ShowShop });
+        buttons.Add(new UiButton { Text = "RULES", OnClick = () => showHelp = true });
         buttons.Add(new UiButton { Text = "QUIT", OnClick = host.Quit });
     }
 
@@ -153,9 +147,10 @@ sealed class MenuScreen : IScreen
             rows[i].Rect = new RectangleF(x, y + i * h, w, h);
         float by = y + rows.Count * h + 48 * u;
         float bw = (w - 16 * u) / 3;
-        buttons[0].Rect = new RectangleF(x, by, w, 50 * u);
+        buttons[0].Rect = new RectangleF(x, by, w, buttons[0].Height(u));
+        float rowY = by + buttons[0].Height(u) + UiButton.Gap * u;
         for (int i = 1; i < 4; i++)
-            buttons[i].Rect = new RectangleF(x + (i - 1) * (bw + 8 * u), by + 60 * u, bw, 38 * u);
+            buttons[i].Rect = new RectangleF(x + (i - 1) * (bw + 8 * u), rowY, bw, buttons[i].Height(u));
     }
 
     public void Draw(Graphics g, Size s)
@@ -177,9 +172,9 @@ sealed class MenuScreen : IScreen
         DrawRack(g, s);
 
         float x = 72 * u;
-        Ui.Tracked(g, "NEON CUE", Ui.Head(64 * u), Ui.Text, x, 128 * u, 8 * u);
-        using (var gb = new SolidBrush(Ui.Gold)) g.FillRectangle(gb, x, 170 * u, 80 * u, 2 * u);
-        Ui.Tracked(g, "PROFESSIONAL BILLIARDS", Ui.Head(14 * u), Ui.Text2, x, 194 * u, 4 * u);
+        Ui.Tracked(g, "NEON CUE", Ui.Head(64 * u), Ui.Text, x, 128 * u, 3.2f * u);
+        using (var gb = new SolidBrush(Ui.Gold)) g.FillRectangle(gb, x, 170 * u, 64 * u, 2 * u);
+        Ui.Tracked(g, "PROFESSIONAL BILLIARDS", Ui.Head(14 * u), Ui.Text2, x, 194 * u, 2.2f * u);
 
         var first = rows[0].Rect;
         var card = new RectangleF(first.X - 1, first.Y - 1, first.Width + 2, rows.Count * first.Height + 2);
@@ -193,23 +188,32 @@ sealed class MenuScreen : IScreen
         foreach (var b in buttons) b.Draw(g, u);
 
         var cue = cfg.Equipped;
-        // Top bar, right to left: coins, then the equipped cue.
+        float icon = 15 * u;
         float rx = s.Width - 32 * u;
         string coins = cfg.Coins.ToString("N0");
-        rx -= Ui.TrackedWidth(g, coins, Ui.Num(20 * u), 0.5f * u);
-        Ui.Tracked(g, coins, Ui.Num(20 * u), Ui.Gold, rx, 33 * u, 0.5f * u);
-        rx -= 10 * u;
-        Ui.Tracked(g, "COINS", Ui.Head(11 * u), Ui.Text3, rx, 33 * u, 2.2f * u, StringAlignment.Far);
-        rx -= Ui.TrackedWidth(g, "COINS", Ui.Head(11 * u), 2.2f * u) + 22 * u;
+        var coinFont = Ui.Num(20 * u);
+        float coinW = Ui.TrackedWidth(g, coins, coinFont, 0.5f * u);
+        rx -= coinW;
+        Ui.Tracked(g, coins, coinFont, Ui.Gold, rx, 33 * u, 0.5f * u);
+        Glyphs.Draw(g, Glyph.Coin, rx - 8 * u - icon / 2, 33 * u, icon, Ui.Gold);
+        rx -= 8 * u + icon + 18 * u;
         Ui.Hairline(g, rx, 22 * u, rx, 44 * u);
-        rx -= 22 * u;
-        Ui.Tracked(g, cue.Name.ToUpperInvariant(), Ui.Head(13 * u), CueArt.TierColor(cue.Tier), rx, 33 * u, 1.8f * u, StringAlignment.Far);
-        rx -= Ui.TrackedWidth(g, cue.Name.ToUpperInvariant(), Ui.Head(13 * u), 1.8f * u) + 10 * u;
-        Ui.Tracked(g, "CUE", Ui.Head(11 * u), Ui.Text3, rx, 33 * u, 2.2f * u, StringAlignment.Far);
+        rx -= 18 * u;
+        var nameFont = Ui.Head(13 * u);
+        float nameW = Ui.TrackedWidth(g, cue.Name.ToUpperInvariant(), nameFont, 1.8f * u);
+        rx -= nameW;
+        Ui.Tracked(g, cue.Name.ToUpperInvariant(), nameFont, CueArt.TierColor(cue.Tier), rx, 33 * u, 1.8f * u);
+        Glyphs.Draw(g, Glyph.Cue, rx - 8 * u - icon / 2, 33 * u, icon, CueArt.TierColor(cue.Tier));
 
-        Ui.Hairline(g, 0, s.Height - 44 * u, s.Width, s.Height - 44 * u);
-        Ui.Tracked(g, "↑↓ SELECT    ←→ CHANGE    ENTER PLAY    C CUE SHOP    F1 HELP", Ui.Head(11 * u), Ui.Text3, x, s.Height - 22 * u, 1.8f * u);
-        Ui.Tracked(g, "V1.11", Ui.Head(11 * u), Ui.Text3, s.Width - 24 * u, s.Height - 22 * u, 1.8f * u, StringAlignment.Far);
+        Ui.Hairline(g, 0, s.Height - 48 * u, s.Width, s.Height - 48 * u);
+        Ui.Legend(g, x, s.Height - 24 * u, s.Width - 88 * u, u,
+            (Glyph.UpDown, "", "Select"),
+            (Glyph.LeftRight, "", "Change"),
+            (Glyph.Play, "Enter", "Play"),
+            (Glyph.Cue, "C", "Cues"),
+            (Glyph.Rack, "F1", "Rules"),
+            (Glyph.Corners, "F11", "Screen"));
+        Ui.Tracked(g, "V1.12", Ui.Head(11 * u), Ui.Text3, s.Width - 28 * u, s.Height - 24 * u, 1.6f * u, StringAlignment.Far);
 
         if (showHelp) DrawHelp(g, s);
     }
@@ -253,44 +257,74 @@ sealed class MenuScreen : IScreen
         if (enabled)
         {
             Color ac = active ? Ui.Gold : Ui.Text3;
-            Ui.Chevron(g, new PointF(vx + 8 * u, cy), 10 * u, false, ac, 1.4f * u);
-            Ui.Chevron(g, new PointF(vx + vw - 8 * u, cy), 10 * u, true, ac, 1.4f * u);
+            Glyphs.Draw(g, Glyph.ChevronLeft, vx + 10 * u, cy, 12 * u, ac);
+            Glyphs.Draw(g, Glyph.ChevronRight, vx + vw - 10 * u, cy, 12 * u, ac);
         }
     }
 
     void DrawHelp(Graphics g, Size s)
     {
         Ui.Scrim(g, s, 200);
-        var r = new RectangleF(s.Width / 2f - 430 * u, s.Height / 2f - 330 * u, 860 * u, 660 * u);
+        var r = new RectangleF(s.Width / 2f - 430 * u, s.Height / 2f - 310 * u, 860 * u, 620 * u);
         Ui.Shadow(g, r, 6 * u, 14 * u);
         Ui.Card(g, r, 6 * u, 250);
         using (var gb = new SolidBrush(Ui.Gold)) g.FillRectangle(gb, r.X, r.Y, r.Width, 3 * u);
-        Ui.Heading(g, "How to play", r.X + r.Width / 2, r.Y + 44 * u, u, 26);
+        Ui.Heading(g, "Match guide", r.X + r.Width / 2, r.Y + 42 * u, u, 24);
 
-        string controls =
-            "Aim — move the mouse; the cue follows it.\n" +
-            "Shoot — press (on the cue ball or the target), drag back, release. Further = harder.\n" +
-            "Fine aim — mouse wheel or ← →  (hold Shift for big steps); hold Ctrl and move for precise aim.\n" +
-            "Keyboard shot — ↑ ↓ set power, Space shoots.\n" +
-            "Spin — click the cue ball widget (bottom right) or W A S D. R resets.\n" +
-            "Ball in hand — move the cue ball, click to place; click it again to pick up.\n" +
-            "H — ask the AI coach for a shot.   G — aim guide.   F — fast forward.\n" +
-            "M — sound.   Esc — pause menu.   C (in menu) — cue shop: better cues hit harder, spin more, wobble less.";
-        Ui.Tracked(g, "CONTROLS", Ui.Head(13 * u), Ui.Gold, r.X + 40 * u, r.Y + 96 * u, 2.5f * u);
-        Gfx.WrappedText(g, controls, Ui.Body(14 * u), Ui.Text, new RectangleF(r.X + 40 * u, r.Y + 110 * u, r.Width - 80 * u, 220 * u));
+        float col = (r.Width - 96 * u) / 2;
+        float left = r.X + 36 * u, right = left + col + 24 * u;
+        Section(g, left, r.Y + 96 * u, "The stroke");
+        Section(g, right, r.Y + 96 * u, "The table");
+        (string t, string b)[] stroke =
+        [
+            ("Aim", "The cue points at the pointer."),
+            ("Shot", "Draw back and release. Further is harder."),
+            ("Fine aim", "Wheel or arrows. Alt is the finer tick."),
+            ("Power", "Up and Down set it. Space plays it."),
+            ("Spin", "The marker, or W A S D. R centres it."),
+        ];
+        (string t, string b)[] table =
+        [
+            ("Ball in hand", "Click to place. Click again to lift."),
+            ("Coach", "H requests a shot. G sets the guide."),
+            ("Restore", "Backspace returns up to eight shots."),
+            ("Practice", "Right-click lifts a ball. Click sets it."),
+            ("Session", "M sound. Esc pause. F11 full screen."),
+        ];
+        float y = r.Y + 122 * u;
+        for (int i = 0; i < stroke.Length; i++)
+        {
+            GuideRow(g, left, y, col, stroke[i].t, stroke[i].b);
+            GuideRow(g, right, y, col, table[i].t, table[i].b);
+            y += 34 * u;
+        }
 
-        Ui.Tracked(g, "GAME MODES", Ui.Head(13 * u), Ui.Gold, r.X + 40 * u, r.Y + 344 * u, 2.5f * u);
-        float y = r.Y + 360 * u;
+        y += 8 * u;
+        Ui.Hairline(g, left, y, r.Right - 36 * u, y);
+        y += 22 * u;
+        Section(g, left, y, "Formats");
+        y += 26 * u;
         foreach (var m in Modes)
         {
             var rules = GameRules.Create(m);
-            Ui.Write(g, rules.Name, Ui.BodyStrong(14 * u), Ui.Text, new RectangleF(r.X + 40 * u, y, 150 * u, 24 * u));
-            Ui.Write(g, rules.Tagline, Ui.Body(14 * u), Ui.Text2, new RectangleF(r.X + 190 * u, y, r.Width - 230 * u, 24 * u));
-            y += 30 * u;
+            Ui.Write(g, rules.Name, Ui.BodyStrong(13.5f * u), Ui.Text, new RectangleF(left, y, 132 * u, 22 * u));
+            Ui.Write(g, rules.Tagline, Ui.Body(13 * u), Ui.Text2, new RectangleF(left + 140 * u, y, r.Width - 212 * u, 22 * u));
+            y += 26 * u;
         }
-        Ui.Write(g, "Fouls give your opponent ball in hand anywhere on the table.", Ui.Body(14 * u), Ui.Warn,
-            new RectangleF(r.X + 40 * u, y + 6 * u, r.Width - 80 * u, 24 * u));
-        Ui.Write(g, "Click anywhere or press Esc to close", Ui.Body(13 * u), Ui.Text3, new RectangleF(r.X, r.Bottom - 40 * u, r.Width, 24 * u), StringAlignment.Center);
+        Ui.Write(g, "A standard foul awards ball in hand to the incoming player.", Ui.Body(13 * u), Ui.Warn,
+            new RectangleF(left, y + 2 * u, r.Width - 72 * u, 22 * u));
+        Ui.Write(g, "Click anywhere, or press Esc, to close", Ui.Body(12.5f * u), Ui.Text3, new RectangleF(r.X, y + 32 * u, r.Width, 20 * u), StringAlignment.Center);
+    }
+
+    void Section(Graphics g, float x, float y, string title)
+    {
+        Ui.Tracked(g, title.ToUpperInvariant(), Ui.Head(11 * u), Ui.Gold, x, y, 1.8f * u);
+    }
+
+    void GuideRow(Graphics g, float x, float y, float w, string title, string body)
+    {
+        Ui.Write(g, title, Ui.BodyStrong(13 * u), Ui.Text, new RectangleF(x, y, 108 * u, 22 * u));
+        Ui.Write(g, body, Ui.Body(12.5f * u), Ui.Text2, new RectangleF(x + 112 * u, y, w - 112 * u, 22 * u));
     }
 
     public void MouseMove(MouseEventArgs e)

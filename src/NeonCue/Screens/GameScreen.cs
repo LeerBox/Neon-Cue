@@ -40,16 +40,35 @@ sealed class GameScreen : IScreen, IPhysicsListener
     int rollUpdates;
     readonly List<Toast> toasts = new();
     readonly List<Sink> sinks = new();
+    readonly List<PocketFlash> flashes = new();
     readonly List<UiButton> buttons = new();
+    readonly List<ShotMark> history = new();
     GameState state;
+
+    /// <summary>Practice only: an object ball being carried to a new spot. -1 when none.</summary>
+    int held = -1;
+    Vec2 heldHome;
+    /// <summary>Bumped when a practice ball is set down, so the aim guide resimulates.</summary>
+    int layout;
 
     Phase phase;
     bool paused;
     double phaseTime, rollTime, physicsAcc, clock, overlayTimer;
     double aimAngle = Math.PI, kbPower = 0.45, dragPower, spinSide, spinTop;
-    bool dragging, spinDrag, fastForward, aimLocked;
+    bool dragging, spinDrag, fastForward;
+    /// <summary>Button-down aiming, or a committed draw along the cue. Release strikes only from Pulling.</summary>
+    enum CueStroke { Aiming, Pulling }
+    CueStroke cueStroke;
+    /// <summary>World units of backward draw that equal a full-power strike.</summary>
+    const double MaxPull = 260;
+    /// <summary>Backward drag, in world units, that commits a draw. Shorter than this is not a shot.</summary>
+    const double PullCommit = 4;
+    /// <summary>Easing back inside this distance cancels the draw.</summary>
+    const double PullRelease = 2;
+    double cueFollow = -1, followAim, followPower;
     Point mouse;
-    Vec2 dragStart, mouseWorld;
+    Vec2 mouseWorld, dragOrigin;
+    double strokeAim;
     ShotEvents events = new();
     Task<AIShot>? aiTask, hintTask;
     int hintShotNumber;
@@ -117,21 +136,21 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         PlayerState Human(string name) => new() { Name = name, Cue = cfg.Equipped };
         PlayerState Bot(string name) => new() { Name = name, IsAI = true, Level = cfg.Level, Cue = CueCatalog.ForAI(cfg.Level) };
-        if (rules.IsSolo) return cfg.Opponent == OpponentType.CpuVsCpu ? [Bot("NEON-BOT")] : [Human("You")];
+        if (rules.IsSolo) return cfg.Opponent == OpponentType.CpuVsCpu ? [Bot("Neon")] : [Human("You")];
         return cfg.Opponent switch
         {
-            OpponentType.Cpu => [Human("You"), Bot("NEON-BOT")],
+            OpponentType.Cpu => [Human("You"), Bot("Neon")],
             OpponentType.TwoPlayer => [Human("Player 1"), Human("Player 2")],
-            _ => [Bot("ALPHA-BOT"), Bot("OMEGA-BOT")],
+            _ => [Bot("Alpha"), Bot("Omega")],
         };
     }
 
     bool HumanTurn => !state.CurrentPlayer.IsAI && !state.RackOver;
-    static double AimFreezeRadius => 1.6 * R;   // over the cue ball itself
-    static double GripRadius => 3 * R;          // pressing this close to the cue ball = pulling back from it
-    double rawAim = Math.PI;
+    /// <summary>At the cue-ball centre the direction is undefined. Anywhere else the cue points at the pointer.</summary>
+    const double AimCenterEpsilon = 0.75;
+    Keys? aimModifiersOverride;
     Vec2 lastMouseWorld;
-    double lastMoveTime;
+    double lastAimMoveTime;
 
     /// <summary>Background simulation of the current aim at 20 power levels.</summary>
     sealed class ShotPreview
@@ -145,27 +164,19 @@ sealed class GameScreen : IScreen, IPhysicsListener
     const int PreviewSteps = 20;
     volatile ShotPreview? preview;
     int previewVersion;
-    (double aim, double side, double top, Vec2 cue, int shot) previewKey;
-    bool aimDwellPending;
-    static double TrustedAimDist => 10 * R;     // aims set this far out are deliberate, never reach noise
-    double trustedAim = Math.PI, trustedAimTime = -1, lastNearAimTime = -1;
-    double radialTrend, tangTrend;
+    (double aim, double side, double top, Vec2 cue, int shot, int layout) previewKey;
     bool pressedOnCue;
-    double aimSetDist;
 
     // ================================================================== flow
 
     void BeginTurn()
     {
         dragging = false;
+        cueStroke = CueStroke.Aiming;
         dragPower = 0;
+        cueFollow = -1;
         aiShot = null;
         phaseTime = 0;
-        aimLocked = false;
-        aimSetDist = 0;
-        trustedAim = aimAngle;
-        trustedAimTime = clock;
-        lastNearAimTime = -1;
         lastMouseWorld = mouseWorld;
         if (state.RackOver)
         {
@@ -178,7 +189,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         var p = state.CurrentPlayer;
         if (p.IsAI && rules.ShouldConcede(state, state.Current))
         {
-            Say($"{p.Name} concedes the frame", Theme.Amber, 3);
+            Say($"{p.Name} concedes the frame.", Theme.Amber, 3);
             rules.ConcedeFrame(state, state.Current);
             host.Sound.Win();
             BeginTurn();
@@ -196,12 +207,15 @@ sealed class GameScreen : IScreen, IPhysicsListener
         {
             phase = state.BallInHand ? Phase.Placing : Phase.Aiming;
             if (cfg.Opponent == OpponentType.TwoPlayer && state.PlayerCount > 1)
-                Say($"{p.Name} to shoot", Theme.PlayerColor(state.Current), 1.6);
+                Say($"{p.Name} to play.", Theme.PlayerColor(state.Current), 1.6);
         }
     }
 
     void Shoot(double angle, double power, double side, double top)
     {
+        if (held >= 0) return;
+        ShotTrace.Clear();
+        if (!state.CurrentPlayer.IsAI) RememberShot();
         // Cheaper cues wobble: human strokes pick up the cue's aim error (AI noise already includes it).
         var stick = state.CurrentPlayer.Cue;
         if (cfg.StrokeError && !state.CurrentPlayer.IsAI && stick.AimError > 0) angle += Gauss() * stick.WobbleDeg(power) * Math.PI / 180;
@@ -213,6 +227,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
         phase = Phase.Rolling;
         phaseTime = 0;
         dragging = false;
+        cueStroke = CueStroke.Aiming;
+        followAim = angle;
+        followPower = power;
+        cueFollow = 0;
         dragPower = 0;
         state.BallInHand = false;
         hintTask = null;
@@ -268,8 +286,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
             Say(m, c);
         }
         if (!o.RackOver && state.BallInHand && state.PlayerCount > 1 && o.Foul)
-            Say($"Ball in hand — {state.CurrentPlayer.Name}", Theme.Amber);
-        if (coins > 0) Say($"+{coins} coins", Theme.Amber, o.RackOver ? 4 : 1.6);
+            Say($"Ball in hand. {state.CurrentPlayer.Name} to place.", Theme.Amber);
+        if (coins > 0) Say($"+{coins} coins.", Theme.Amber, o.RackOver ? 4 : 1.6);
         if (o.RackOver) host.Sound.Win();
         if (!o.RackOver && !o.Foul && shooter != state.Current && state.PlayerCount > 1 && events.PocketedObjects.Any() == false)
             fx.Pulse(state.Cue.Pos, Theme.PlayerColor(state.Current), 26);
@@ -280,6 +298,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         if (state.MatchOver) state = NewMatch(1 - state.Breaker);
         else rules.StartNextRack(state, rng);
+        history.Clear();
         toasts.Clear();
         BeginTurn();
     }
@@ -288,9 +307,101 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         state = NewMatch(0);
         paused = false;
+        history.Clear();
+        held = -1;
         toasts.Clear();
         sinks.Clear();
+        flashes.Clear();
         BeginTurn();
+    }
+
+    /// <summary>Table, score and coins from just before one of your strokes. The opponent's reply is not stored on its own, so taking a shot back also undoes whatever they played after it.</summary>
+    sealed class ShotMark
+    {
+        public required GameState State;
+        public required Mat3[] Orient;
+        public required List<string> Log;
+        public int Coins;
+        public double Aim, Power, Side, Top;
+    }
+
+    const int MaxHistory = 8;
+
+    void RememberShot()
+    {
+        history.Add(new ShotMark
+        {
+            State = state.Clone(),
+            Orient = orient.ToArray(),
+            Log = [.. eventLog],
+            Coins = cfg.Coins,
+            Aim = aimAngle,
+            Power = kbPower,
+            Side = spinSide,
+            Top = spinTop,
+        });
+        if (history.Count > MaxHistory) history.RemoveAt(0);
+    }
+
+    bool UndoLastShot()
+    {
+        if (phase == Phase.Rolling)
+        {
+            Note("Wait until the balls have stopped.");
+            return false;
+        }
+        if (history.Count == 0)
+        {
+            Note("There is no shot to restore.");
+            return false;
+        }
+        if (held >= 0) CancelHeld();
+        var mark = history[^1];
+        history.RemoveAt(history.Count - 1);
+        state = mark.State;
+        Array.Copy(mark.Orient, orient, Math.Min(orient.Length, mark.Orient.Length));
+        cfg.Coins = mark.Coins;
+        cfg.Save();
+        eventLog.Clear();
+        eventLog.AddRange(mark.Log);
+        aiTask = null;
+        hintTask = null;
+        aiShot = null;
+        sinks.Clear();
+        flashes.Clear();
+        toasts.Clear();
+        paused = false;
+        dragging = false;
+        dragPower = 0;
+        foreach (var ball in state.Balls)
+            lastPos[ball.Number] = prevPos[ball.Number] = ball.Pos;
+        InvalidateGuides();
+        BeginTurn();
+        if (!state.CurrentPlayer.IsAI && !state.RackOver)
+        {
+            kbPower = mark.Power;
+            spinSide = mark.Side;
+            spinTop = mark.Top;
+            PlaceAim(mark.Aim);
+        }
+        Say("The previous shot has been restored.", Theme.Cyan, 1.6);
+        return true;
+    }
+
+    void Note(string text)
+    {
+        if (toasts.Any(t => t.Text == text)) return;
+        Say(text, Theme.TextDim, 1.2);
+    }
+
+    void InvalidateGuides()
+    {
+        previewVersion++;
+        trajVersion++;
+        preview = null;
+        trajectory = null;
+        previewKey = default;
+        trajKey = default;
     }
 
     void Say(string text, Color color, double life = 2.8)
@@ -310,6 +421,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     public void Update(double dt)
     {
         clock += dt;
+        if (cueFollow >= 0 && (cueFollow += dt) > 0.22) cueFollow = -1;
         fx.Update(dt);
         for (int i = toasts.Count - 1; i >= 0; i--)
         {
@@ -321,11 +433,16 @@ sealed class GameScreen : IScreen, IPhysicsListener
             sinks[i].T += dt / 0.28;
             if (sinks[i].T >= 1) sinks.RemoveAt(i);
         }
+        for (int i = flashes.Count - 1; i >= 0; i--)
+        {
+            flashes[i].Age += dt;
+            if (flashes[i].Age > PocketFlash.Life) flashes.RemoveAt(i);
+        }
 
         SyncRolling();
-        UpdateAimDwell();
         UpdatePreview();
         UpdateTrajectory();
+        UpdateSuggestion();
         if (hintTask is { IsCompleted: true }) ApplyHint();
         if (paused) return;
         phaseTime += dt;
@@ -472,14 +589,23 @@ sealed class GameScreen : IScreen, IPhysicsListener
             fx.Pulse(pocket.DrawCenter, c, 30);
         }
         host.Sound.Pocket(pocket.DrawCenter.X / Table.Width);
+        flashes.Add(new PocketFlash { At = pocket.DrawCenter, Radius = (float)pocket.DrawRadius });
+    }
+
+    sealed class PocketFlash
+    {
+        public const double Life = 0.5;
+        public Vec2 At;
+        public float Radius;
+        public double Age;
     }
 
     // ================================================================== hint (AI coach)
 
     void RequestHint()
     {
-        if (!HumanTurn || hintTask != null || phase is not (Phase.Aiming or Phase.Placing)) return;
-        Say("Coach is reading the table…", Theme.TextDim, 1.4);
+        if (held >= 0 || !HumanTurn || hintTask != null || phase is not (Phase.Aiming or Phase.Placing)) return;
+        Say("The coach is selecting a shot.", Theme.TextDim, 1.4);
         var snap = state.Clone();
         int seed = rng.Next();
         hintShotNumber = state.ShotNumber;
@@ -497,8 +623,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
         kbPower = Math.Round(h.Power, 2);
         spinSide = h.SpinSide;
         spinTop = h.SpinTop;
-        SetManualAim(h.Angle);
-        Say($"Coach: {h.Plan} — press Space", Theme.Lime, 4);
+        PlaceAim(h.Angle);
+        Say($"Coach: {h.Plan}. Press Space to play.", Theme.Lime, 4);
     }
 
     // ================================================================== input
@@ -513,6 +639,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
             return;
         }
         if (spinDrag) { SetSpinFrom(e.Location); return; }
+        if (held >= 0)
+        {
+            state.Balls[held].Pos = new Vec2(
+                Math.Clamp(mouseWorld.X, R, Table.Width - R),
+                Math.Clamp(mouseWorld.Y, R, Table.Height - R));
+            lastMouseWorld = mouseWorld;
+            return;
+        }
         if (!HumanTurn) return;
 
         if (phase == Phase.Placing)
@@ -521,80 +655,104 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         else if (phase == Phase.Aiming)
         {
-            if (dragging)
-            {
-                Vec2 d = mouseWorld - dragStart;
-                double pull = -Vec2.Dot(d, Vec2.FromAngle(aimAngle));
-                dragPower = Math.Clamp(pull / 260.0, 0, 1);
-            }
-            else
-            {
-                OnAimMouseMove();
-            }
+            if (dragging) ApplyDrag();
+            else OnAimMouseMove(stroke: false);
         }
         lastMouseWorld = mouseWorld;
     }
 
+    Keys AimModifiers => aimModifiersOverride ?? Control.ModifierKeys;
+
     /// <summary>
-    /// Hover aiming. The cue follows the cursor freely as you sweep around the cue ball; the only
-    /// motion it ignores is reaching in towards the cue ball (to grab it and pull back). Resting the
-    /// cursor applies the aim assist; holding Ctrl turns cursor motion into slow, precise rotation.
+    /// Button held. Sideways motion keeps aiming, one to one with the pointer. A drag back along
+    /// the cue becomes the draw: the angle stays, and power is that backward distance over a full
+    /// draw. Easing forward, or swinging off the draw, cancels it. Only the release strikes.
     /// </summary>
-    void OnAimMouseMove()
+    void ApplyDrag()
     {
-        Vec2 move = mouseWorld - lastMouseWorld;
-        lastMoveTime = clock;
-        aimDwellPending = true;
+        Vec2 axis = Vec2.FromAngle(strokeAim);
+        Vec2 delta = mouseWorld - dragOrigin;
+        double back = -Vec2.Dot(delta, axis);
+        double side = Math.Abs(Vec2.Cross(axis, delta));
 
-        Vec2 rel = mouseWorld - state.Cue.Pos;
-        double dist = rel.Length;
-        if (dist <= AimFreezeRadius) return;
-        Vec2 radial = rel / dist;
-        double radialMove = Vec2.Dot(move, radial);
-        double tangMove = Vec2.Cross(radial, move);
-
-        if ((Control.ModifierKeys & Keys.Control) != 0)
+        if (cueStroke == CueStroke.Pulling)
         {
-            // Precision: sideways motion turns the cue at a tenth of the normal rate.
-            SetManualAim(aimAngle + tangMove / dist * 0.1);
+            bool swungOff = side > 12 && side > back * 1.5;
+            if (back < PullRelease || swungOff)
+            {
+                cueStroke = CueStroke.Aiming;
+                dragPower = 0;
+                OnAimMouseMove(stroke: false);
+                dragOrigin = mouseWorld;
+                strokeAim = aimAngle;
+                return;
+            }
+            aimAngle = strokeAim;
+            dragPower = state.CurrentPlayer.Cue.ShapePull(back / MaxPull);
+            NoteAim(applied: false, stroke: true);
             return;
         }
 
-        if (aimLocked)
+        // Gathering a straight draw. Do not retarget, or the pointer crossing the ball flips the cue.
+        if (back > PullCommit && back >= side)
         {
-            // A fine-tuned aim unlocks as soon as the cursor clearly points somewhere else.
-            double off = Math.Abs(Math.IEEERemainder(rel.Angle - aimAngle, 2 * Math.PI));
-            double allowed = Math.Max(1.5 * Math.PI / 180, 12 / Math.Max(1, dist * view.Scale));
-            if (dist <= GripRadius || off < allowed) return;
-            aimLocked = false;
+            cueStroke = CueStroke.Pulling;
+            aimAngle = strokeAim;
+            dragPower = state.CurrentPlayer.Cue.ShapePull(back / MaxPull);
+            host.Sound.CueDraw(state.CurrentPlayer.Cue.Id, state.Cue.Pos.X / Table.Width);
+            NoteAim(applied: false, stroke: true);
+            return;
         }
-        if (dist <= GripRadius) return;
+        if (back > 0 && back >= side)
+        {
+            aimAngle = strokeAim;
+            dragPower = 0;
+            NoteAim(applied: false, stroke: true);
+            return;
+        }
 
-        // Moving in towards the cue ball is reaching for it, not aiming. A jump (first move, window
-        // re-entry) always aims.
-        bool jump = move.Length * view.Scale > 80;
-        // Smoothed motion over the last few moves, so hand shake can't fake a sideways sweep.
-        radialTrend = jump ? 0 : 0.6 * radialTrend + 0.4 * radialMove * view.Scale;
-        tangTrend = jump ? 0 : 0.6 * tangTrend + 0.4 * Math.Abs(tangMove) * view.Scale;
-        bool inward = !jump && radialMove * view.Scale < -1; // more than a pixel of rounding
-        if (inward && -radialMove > 0.8 * Math.Abs(tangMove)) return;
-        bool trendingIn = radialTrend < -1 && -radialTrend > 0.5 * tangTrend;
-
-        rawAim = rel.Angle;
-        aimSetDist = dist;
-        aimAngle = rawAim;
-        // Only sideways/outward sweeps far from the cue ball are trusted for a press on the cue ball;
-        // anything drifting inwards may be the hand on its way over.
-        if (dist >= TrustedAimDist && !inward && !trendingIn) MarkTrustedAim();
-        else lastNearAimTime = clock;
+        dragPower = 0;
+        OnAimMouseMove(stroke: false);
+        if (side > 3 && side > back)
+        {
+            dragOrigin = mouseWorld;
+            strokeAim = aimAngle;
+        }
     }
 
-    /// <summary>The aim the player clearly meant: set far from the cue ball, at rest, or fine-tuned.</summary>
-    void MarkTrustedAim()
+    void CancelStroke()
     {
-        trustedAim = aimAngle;
-        trustedAimTime = clock;
+        dragging = false;
+        cueStroke = CueStroke.Aiming;
+        dragPower = 0;
     }
+
+    /// <summary>
+    /// The cue points at the pointer. The angle is atan2 of the cursor relative to the cue ball,
+    /// in the same table space the stick, the guide, and the shot use. No offset, no gain, no snap.
+    /// </summary>
+    void OnAimMouseMove(bool stroke)
+    {
+        lastAimMoveTime = clock;
+        Vec2 rel = mouseWorld - state.Cue.Pos;
+        if (rel.LengthSq <= AimCenterEpsilon * AimCenterEpsilon)
+        {
+            NoteAim(applied: false, stroke);
+            return;
+        }
+        aimAngle = Math.Atan2(rel.Y, rel.X);
+        NoteAim(applied: true, stroke);
+    }
+
+    /// <summary>Arrow and wheel nudge. The next mouse sample replaces this with the pointer angle.</summary>
+    void PlaceAim(double angle) => aimAngle = Math.IEEERemainder(angle, 2 * Math.PI);
+
+    void NudgeAim(double delta) => PlaceAim(aimAngle + delta);
+
+    void NoteAim(bool applied, bool stroke) =>
+        AimDiag.Add(new AimDiag.Sample(aimAngle, applied, dragging, stroke, phase.ToString()));
+
+    public void PointerCaptureLost() => CancelStroke();
 
     /// <summary>
     /// Re-simulates the aimed shot (exact physics, no wobble) at every power step whenever the aim,
@@ -602,14 +760,14 @@ sealed class GameScreen : IScreen, IPhysicsListener
     /// </summary>
     void UpdatePreview()
     {
-        if (!HumanTurn || phase != Phase.Aiming || cfg.Guide == AimGuide.Off)
+        if (held >= 0 || !HumanTurn || phase != Phase.Aiming || cfg.Guide == AimGuide.Off)
         {
             preview = null;
             return;
         }
-        var key = (aim: aimAngle, side: spinSide, top: spinTop, cue: state.Cue.Pos, shot: state.ShotNumber);
+        var key = (aim: aimAngle, side: spinSide, top: spinTop, cue: state.Cue.Pos, shot: state.ShotNumber, layout);
         bool same = Math.Abs(key.aim - previewKey.aim) < 1e-6 && key.side == previewKey.side && key.top == previewKey.top
-            && Vec2.DistanceSq(key.cue, previewKey.cue) < 1e-6 && key.shot == previewKey.shot;
+            && Vec2.DistanceSq(key.cue, previewKey.cue) < 1e-6 && key.shot == previewKey.shot && key.layout == previewKey.layout;
         if (same) return; // up to date, or a run for this exact shot is in flight
         previewKey = key;
 
@@ -662,20 +820,20 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     volatile Trajectory? trajectory;
     int trajVersion;
-    (double aim, double power, double side, double top, Vec2 cue, int shot) trajKey;
+    (double aim, double power, double side, double top, Vec2 cue, int shot, int layout) trajKey;
 
     void UpdateTrajectory()
     {
-        if (!HumanTurn || phase != Phase.Aiming || cfg.Guide == AimGuide.Off)
+        if (held >= 0 || !HumanTurn || phase != Phase.Aiming || cfg.Guide == AimGuide.Off)
         {
             trajectory = null;
             trajKey = default;
             return;
         }
         double power = Math.Max(0.03, dragging ? dragPower : kbPower);
-        var key = (aim: aimAngle, power: Math.Round(power, 3), side: spinSide, top: spinTop, cue: state.Cue.Pos, shot: state.ShotNumber);
+        var key = (aim: aimAngle, power: Math.Round(power, 3), side: spinSide, top: spinTop, cue: state.Cue.Pos, shot: state.ShotNumber, layout);
         bool same = Math.Abs(key.aim - trajKey.aim) < 1e-7 && key.power == trajKey.power && key.side == trajKey.side
-            && key.top == trajKey.top && Vec2.DistanceSq(key.cue, trajKey.cue) < 1e-8 && key.shot == trajKey.shot;
+            && key.top == trajKey.top && Vec2.DistanceSq(key.cue, trajKey.cue) < 1e-8 && key.shot == trajKey.shot && key.layout == trajKey.layout;
         if (same) return;
         trajKey = key;
         int version = ++trajVersion;
@@ -722,66 +880,87 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     int PowerStep(double power) => Math.Clamp((int)Math.Round(power * PreviewSteps), 1, PreviewSteps);
 
-    /// <summary>Called every frame: a resting cursor settles the aim, with the aim assist.</summary>
-    void UpdateAimDwell()
-    {
-        if (!aimDwellPending || aimLocked || dragging || !HumanTurn || phase != Phase.Aiming) return;
-        double still = clock - lastMoveTime;
-        double dist = Vec2.Distance(mouseWorld, state.Cue.Pos);
-        // Resting near the cue ball is usually "about to pull back", so it needs a much longer dwell.
-        double needed = dist > GripRadius ? 0.1 : 0.6;
-        if (still < needed) return;
-        aimDwellPending = false;
-        if (dist > AimFreezeRadius) CommitAim();
-    }
+    readonly record struct SuggestId(int Target, int Pocket, double Power, double Side, double Top, int Shot, int Layout, double CueX, double CueY);
+    SuggestId suggestId;
+    bool suggestValid;
+    double suggestShown = double.NaN;
+    int suggestVersion;
+    readonly object suggestGate = new();
 
-    /// <summary>Aims exactly at the cursor (with the aim assist) and trusts the result.</summary>
-    void CommitAim()
+    /// <summary>
+    /// Aim assist draws a recommended line. It never writes aimAngle. While the hand is moving the
+    /// line is the jaw-clearing pocket direction; once the hand rests, throw is corrected in the
+    /// real solver. The white guide remains the shot that will actually be played.
+    /// </summary>
+    void UpdateSuggestion()
     {
-        Vec2 rel = mouseWorld - state.Cue.Pos;
-        double dist = rel.Length;
-        if (dist <= AimFreezeRadius) return;
-        rawAim = rel.Angle;
-        aimSetDist = dist;
-        aimAngle = Magnet(rawAim, dist * view.Scale);
-        MarkTrustedAim();
-    }
-
-    void SetManualAim(double angle)
-    {
-        aimAngle = angle;
-        rawAim = angle;
-        aimLocked = true;
-        aimDwellPending = false;
-        MarkTrustedAim();
+        if (held >= 0 || !HumanTurn || phase != Phase.Aiming || cfg.Assist == AimAssist.Off || dragging)
+        {
+            suggestValid = false;
+            lock (suggestGate) { suggestShown = double.NaN; suggestVersion++; }
+            return;
+        }
+        double cursorPx = Math.Max(1, Vec2.Distance(mouseWorld, state.Cue.Pos) * view.Scale);
+        var line = FindPocketLine(aimAngle, cursorPx);
+        if (line is null)
+        {
+            suggestValid = false;
+            lock (suggestGate) { suggestShown = double.NaN; suggestVersion++; }
+            return;
+        }
+        var id = new SuggestId(line.Value.Target, line.Value.Pocket, Math.Round(Math.Max(0.05, kbPower), 3),
+            spinSide, spinTop, state.ShotNumber, layout, state.Cue.Pos.X, state.Cue.Pos.Y);
+        if (clock - lastAimMoveTime <= 0.12)
+        {
+            if (!suggestValid || !suggestId.Equals(id))
+                lock (suggestGate) suggestShown = line.Value.Stick;
+            return;
+        }
+        if (suggestValid && suggestId.Equals(id)) return;
+        suggestId = id;
+        suggestValid = true;
+        // Throw correction runs off the UI thread. The geometric line is already showing, and a late
+        // result is dropped if the player has aimed somewhere else.
+        int version;
+        lock (suggestGate) { version = ++suggestVersion; suggestShown = line.Value.Stick; }
+        var snap = state.Clone();
+        var found = line.Value;
+        double power = Math.Max(0.05, kbPower), side = spinSide, top = spinTop;
+        var stick = state.CurrentPlayer.Cue;
+        Task.Run(() =>
+        {
+            double refined = ShotSolver.RefineAim(snap, found.Target, found.Aim, found.Stick, power, side, top, stick);
+            lock (suggestGate)
+            {
+                if (version == suggestVersion) suggestShown = refined;
+            }
+        });
     }
 
     /// <summary>
-    /// Aim assist: if the hover aim is within a hair of a line that pots a legal ball, use that exact
-    /// line. Applied only when the cursor rests or the stroke starts, never while you sweep;
-    /// strength follows the Aim assist setting (Strong, Light, Off).
+    /// Nearest legal pocket line inside the assist window, or null when nothing is close. The window
+    /// only decides whether a suggestion is drawn. It is not an angle the cue is allowed to sit on.
     /// </summary>
-    double Magnet(double raw, double cursorDistPx)
+    (int Target, int Pocket, double Stick, Vec2 Aim)? FindPocketLine(double raw, double cursorDistPx)
     {
-        // Tolerance covers a few pixels of hand slip at any distance (and at least a fixed angle).
         double window = cfg.Assist switch
         {
             AimAssist.Strong => Math.Clamp(4.0 / Math.Max(1, cursorDistPx), 1.0 * Math.PI / 180, 4.5 * Math.PI / 180),
             AimAssist.Light => Math.Clamp(2.0 / Math.Max(1, cursorDistPx), 0.3 * Math.PI / 180, 1.5 * Math.PI / 180),
             _ => 0,
         };
-        if (window <= 0) return raw;
+        if (window <= 0) return null;
         var stick = state.CurrentPlayer.Cue;
         Vec2 c = state.Cue.Pos;
-        double best = raw, bestD = window;
-        int bestTarget = -1;
-        Vec2 bestAim = default;
-        foreach (var t in state.Balls)
+        double bestD = window;
+        (int Target, int Pocket, double Stick, Vec2 Aim)? best = null;
+        for (int pi = 0; pi < Table.Pockets.Length; pi++)
         {
-            if (t.Number == 0 || t.Pocketed || !rules.IsLegalFirstContact(state, t.Number) || !rules.IsGoodPot(state, t.Number)) continue;
-            foreach (var p in Table.Pockets)
+            var p = Table.Pockets[pi];
+            foreach (var t in state.Balls)
             {
-                Vec2 aim = Vec2.Distance(t.Pos, p.Aim) < 3 * R ? p.Center : p.Aim;
+                if (t.Number == 0 || t.Pocketed || !rules.IsLegalFirstContact(state, t.Number) || !rules.IsGoodPot(state, t.Number)) continue;
+                if (!PocketEntry.TryGet(p, t.Pos, out Vec2 aim)) continue;
                 Vec2 dir = (aim - t.Pos).Normalized();
                 double approach = Math.Acos(Math.Clamp(Vec2.Dot(dir, -p.Inward), -1, 1));
                 if (approach > (p.IsCorner ? 1.15 : 0.95)) continue;
@@ -791,12 +970,13 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 if (!PathClear(c, ghost, 0, t.Number) || !PathClear(t.Pos, aim, t.Number, 0)) continue;
                 double stickAngle = cg.Angle + spinSide * stick.Squirt * Math.PI / 180;
                 double d = Math.Abs(Math.IEEERemainder(stickAngle - raw, 2 * Math.PI));
-                if (d < bestD) { bestD = d; best = stickAngle; bestTarget = t.Number; bestAim = aim; }
+                double pocketRun = Vec2.Distance(t.Pos, aim);
+                double cut = Math.Acos(Math.Clamp(Vec2.Dot(cg.Normalized(), dir), -1, 1));
+                double ease = 1.0 / (1.0 + pocketRun / 850.0 + cut * 0.85);
+                double allow = window * (0.5 + 0.5 * ease);
+                if (d < allow && d < bestD) { bestD = d; best = (t.Number, pi, stickAngle, aim); }
             }
         }
-        // Real balls throw: snap to the line that actually sends the ball to the pocket.
-        if (bestTarget > 0)
-            best = ShotSolver.RefineAim(state, bestTarget, bestAim, best, Math.Max(0.05, kbPower), spinSide, spinTop, stick);
         return best;
     }
 
@@ -806,6 +986,45 @@ sealed class GameScreen : IScreen, IPhysicsListener
         {
             if (o.Pocketed || o.Number == ex1 || o.Number == ex2) continue;
             if (Vec2.DistanceToSegment(o.Pos, a, b) < 2 * R * 0.98) return false;
+        }
+        return true;
+    }
+
+    bool CanMoveBalls() => rules.IsSolo && HumanTurn && phase is Phase.Aiming or Phase.Placing;
+
+    void TryPickBall()
+    {
+        int best = -1;
+        double bestD = R * 1.7;
+        foreach (var b in state.Balls)
+        {
+            if (b.Pocketed || b.Number == 0) continue;
+            double d = Vec2.Distance(b.Pos, mouseWorld);
+            if (d < bestD) { bestD = d; best = b.Number; }
+        }
+        if (best < 0) return;
+        held = best;
+        heldHome = state.Balls[best].Pos;
+        InvalidateGuides();
+    }
+
+    void CancelHeld()
+    {
+        if (held < 0) return;
+        state.Balls[held].Pos = heldHome;
+        lastPos[held] = heldHome;
+        held = -1;
+        InvalidateGuides();
+    }
+
+    bool Placeable(int number, Vec2 p)
+    {
+        if (!Table.InsidePlayArea(p)) return false;
+        double min = (2 * R + 0.5) * (2 * R + 0.5);
+        foreach (var b in state.Balls)
+        {
+            if (b.Pocketed || b.Number == number) continue;
+            if (Vec2.DistanceSq(b.Pos, p) < min) return false;
         }
         return true;
     }
@@ -830,6 +1049,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
     public void MouseDown(MouseEventArgs e)
     {
+        mouse = e.Location;
+        mouseWorld = view.ToWorld(e.Location);
         if (paused || phase == Phase.RackOver)
         {
             if (UiButton.Hit(buttons, e.Location)) host.Sound.Click();
@@ -837,13 +1058,31 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (e.Button == MouseButtons.Right)
         {
-            dragging = false;
-            dragPower = 0;
+            // A pull in progress cancels. A bare right-click, in Practice, picks up a ball.
+            bool pulling = dragging;
+            CancelStroke();
+            if (!pulling && CanMoveBalls())
+            {
+                if (held >= 0) CancelHeld();
+                else TryPickBall();
+            }
             return;
         }
         if (Distance(e.Location, spinCenter) <= spinRadius * 1.15f)
         {
-            if (HumanTurn) { spinDrag = true; SetSpinFrom(e.Location); }
+            if (HumanTurn && held < 0) { spinDrag = true; SetSpinFrom(e.Location); }
+            return;
+        }
+        if (held >= 0)
+        {
+            if (Placeable(held, state.Balls[held].Pos))
+            {
+                held = -1;
+                layout++;
+                InvalidateGuides();
+                host.Sound.Click();
+            }
+            else Say("That position overlaps another ball.", Theme.Red, 1.2);
             return;
         }
         if (!HumanTurn) return;
@@ -859,18 +1098,13 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (phase == Phase.Aiming)
         {
-            // Pressing at the cue ball means "pull back from here" with the aim already set.
-            // With ball in hand, a click (no drag) on it picks it up.
+            // The angle at the press is the angle that will be played. Pressing does not move the cue.
             double toCue = Vec2.Distance(mouseWorld, state.Cue.Pos);
-            // Pressing away from the cue ball commits the aim right there (unless fine-tuned).
-            if (toCue > GripRadius && !aimLocked) CommitAim();
-            // Pressing on the cue ball right after the cursor travelled in close: that was the hand
-            // reaching over, so shoot the line the player last clearly set.
-            else if (toCue <= GripRadius && !aimLocked && lastNearAimTime > trustedAimTime && clock - lastNearAimTime < 0.6)
-                aimAngle = trustedAim;
             pressedOnCue = state.BallInHand && toCue < R * 1.6;
             dragging = true;
-            dragStart = mouseWorld;
+            cueStroke = CueStroke.Aiming;
+            dragOrigin = mouseWorld;
+            strokeAim = aimAngle;
             dragPower = 0;
         }
     }
@@ -879,22 +1113,23 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         spinDrag = false;
         if (!dragging) return;
-        dragging = false;
-        if (HumanTurn && phase == Phase.Aiming && dragPower > 0.01) Shoot(aimAngle, dragPower, spinSide, spinTop);
-        else
-        {
-            dragPower = 0;
-            if (pressedOnCue && HumanTurn && phase == Phase.Aiming) phase = Phase.Placing;
-            else if (HumanTurn && phase == Phase.Aiming) Say("Drag back, then release to shoot", Theme.TextDim, 1.4);
-        }
+        bool strike = cueStroke == CueStroke.Pulling && dragPower >= PullCommit / MaxPull;
+        double angle = aimAngle, power = dragPower;
+        CancelStroke();
+        if (strike && HumanTurn && phase == Phase.Aiming)
+            Shoot(angle, power, spinSide, spinTop);
+        else if (pressedOnCue && HumanTurn && phase == Phase.Aiming)
+            phase = Phase.Placing;
         pressedOnCue = false;
     }
 
     public void MouseWheel(MouseEventArgs e)
     {
-        if (!HumanTurn || phase != Phase.Aiming || dragging) return;
-        bool coarse = (Control.ModifierKeys & Keys.Shift) != 0;
-        SetManualAim(aimAngle + Math.Sign(e.Delta) * (coarse ? FineStepCoarse : FineStep));
+        if (held >= 0 || !HumanTurn || phase != Phase.Aiming || cueStroke == CueStroke.Pulling) return;
+        bool coarse = (AimModifiers & Keys.Shift) != 0;
+        bool ultra = (AimModifiers & Keys.Alt) != 0;
+        lastAimMoveTime = clock;
+        NudgeAim(Math.Sign(e.Delta) * AimStep(coarse, ultra));
     }
 
     void SetSpinFrom(Point p)
@@ -919,9 +1154,15 @@ sealed class GameScreen : IScreen, IPhysicsListener
 
         if (k == Keys.Escape)
         {
+            if (held >= 0) { CancelHeld(); return true; }
             if (phase == Phase.RackOver) return true;
             paused = !paused;
             if (paused) BuildPauseButtons();
+            return true;
+        }
+        if (k == Keys.Back || (k == Keys.Z && (keyData & Keys.Control) != 0))
+        {
+            UndoLastShot();
             return true;
         }
         if (phase == Phase.RackOver && k is Keys.Enter or Keys.Space)
@@ -931,22 +1172,25 @@ sealed class GameScreen : IScreen, IPhysicsListener
         }
         if (paused) return k is Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Space;
 
-        bool aiming = HumanTurn && phase == Phase.Aiming && !dragging;
+        bool aiming = HumanTurn && phase == Phase.Aiming && cueStroke != CueStroke.Pulling;
+        bool aimFree = aiming && !dragging;
         switch (k)
         {
             case Keys.Left:
             case Keys.Right:
                 if (aiming)
                 {
-                    SetManualAim(aimAngle + (k == Keys.Right ? 1 : -1) * (shift ? FineStepCoarse : FineStep));
+                    bool ultra = (keyData & Keys.Alt) != 0;
+                    lastAimMoveTime = clock;
+                    NudgeAim((k == Keys.Right ? 1 : -1) * AimStep(shift, ultra));
                 }
                 return true;
             case Keys.Up:
             case Keys.Down:
-                kbPower = Math.Clamp(kbPower + (k == Keys.Up ? 1 : -1) * (shift ? 0.1 : 0.02), 0.02, 1);
+                if (aimFree) kbPower = Math.Clamp(kbPower + (k == Keys.Up ? 1 : -1) * (shift ? 0.1 : 0.02), 0.02, 1);
                 return true;
             case Keys.Space:
-                if (aiming) Shoot(aimAngle, kbPower, spinSide, spinTop);
+                if (aimFree) Shoot(aimAngle, kbPower, spinSide, spinTop);
                 return true;
             case Keys.W: if (HumanTurn) NudgeSpin(0, 0.1); return true;
             case Keys.S: if (HumanTurn) NudgeSpin(0, -0.1); return true;
@@ -956,19 +1200,24 @@ sealed class GameScreen : IScreen, IPhysicsListener
             case Keys.H: RequestHint(); return true;
             case Keys.G:
                 cfg.Guide = (AimGuide)(((int)cfg.Guide + 1) % 3);
-                Say($"Aim guide: {cfg.Guide switch { AimGuide.Off => "off", AimGuide.GhostBall => "ghost ball", _ => "full prediction" }}", Theme.Cyan, 1.5);
+                Say($"Aim guide: {cfg.Guide switch { AimGuide.Off => "off", AimGuide.GhostBall => "ghost ball", _ => "full path" }}.", Theme.Cyan, 1.5);
                 return true;
             case Keys.F:
                 fastForward = !fastForward;
-                Say(fastForward ? "Fast forward ON" : "Fast forward off", Theme.Cyan, 1.2);
+                Say(fastForward ? "Play accelerated." : "Standard speed.", Theme.Cyan, 1.2);
                 return true;
             case Keys.Tab:
                 showStats = !showStats;
                 return true;
+            case Keys.V:
+                ShotTrace.Show = !ShotTrace.Show;
+                if (!ShotTrace.Show) ShotTrace.Clear();
+                Say(ShotTrace.Show ? "Physics trace on." : "Physics trace off.", Theme.Cyan, 1.2);
+                return true;
             case Keys.M:
                 cfg.Sound = !cfg.Sound;
                 host.Sound.Enabled = cfg.Sound;
-                Say(cfg.Sound ? "Sound on" : "Sound off", Theme.Cyan, 1.2);
+                Say(cfg.Sound ? "Sound enabled." : "Sound muted.", Theme.Cyan, 1.2);
                 return true;
         }
         return false;
@@ -978,6 +1227,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         buttons.Clear();
         buttons.Add(new UiButton { Text = "RESUME", Primary = true, OnClick = () => paused = false });
+        if (history.Count > 0)
+            buttons.Add(new UiButton { Text = "RESTORE SHOT", OnClick = () => UndoLastShot() });
         buttons.Add(new UiButton { Text = "RESTART MATCH", OnClick = Restart });
         buttons.Add(new UiButton { Text = "MAIN MENU", Accent = Theme.Magenta, OnClick = host.ShowMenu });
     }
@@ -994,7 +1245,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
         Ui.Shadow(g, r, 6 * u, 18 * u);
         Ui.Card(g, r, 6 * u, 248);
         using (var top = new SolidBrush(Ui.Gold)) g.FillRectangle(top, r.X, r.Y, r.Width, 3 * u);
-        Ui.Heading(g, "Match statistics", cx, r.Y + 40 * u, u, 22);
+        Ui.Heading(g, "Match record", cx, r.Y + 40 * u, u, 22);
         Ui.Tracked(g, $"{rules.Name.ToUpperInvariant()}   ·   {(rules.Mode == GameMode.Snooker ? "FRAME" : "RACK")} {state.RackNumber}",
             Ui.Head(10.5f * u), Ui.Text3, cx, r.Y + 72 * u, 2 * u, StringAlignment.Center);
 
@@ -1016,7 +1267,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             rows.Add(("BEST RUN", i => state.Players[i].BestRun.ToString()));
         }
         rows.Add(("SHOTS", i => state.Players[i].Shots.ToString()));
-        rows.Add(("POT SUCCESS", i => state.Players[i].Shots == 0 ? "–" : $"{100.0 * state.Players[i].Pots / state.Players[i].Shots:0}%"));
+        rows.Add(("POT RATE", i => state.Players[i].Shots == 0 ? "–" : $"{100.0 * state.Players[i].Pots / state.Players[i].Shots:0}%"));
         rows.Add(("FOULS", i => state.Players[i].Fouls.ToString()));
 
         int n = state.PlayerCount;
@@ -1055,7 +1306,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             if (snooker)
             {
                 string note = $"{SnookerRules.PointsRemaining(state)} points remaining";
-                for (int i = 0; i < 2; i++) if (SnookerRules.NeedsSnookers(state, i)) note += $"   ·   {state.Players[i].Name} needs snookers";
+                for (int i = 0; i < 2; i++) if (SnookerRules.NeedsSnookers(state, i)) note += $"   ·   {state.Players[i].Name} requires snookers";
                 Ui.Write(g, note, Ui.Body(12.5f * u), Ui.Warn, new RectangleF(labelX, y, r.Width - 80 * u, rowH));
                 y += rowH;
             }
@@ -1064,16 +1315,16 @@ sealed class GameScreen : IScreen, IPhysicsListener
         y += 6 * u;
         Ui.Hairline(g, labelX, y, r.Right - 40 * u, y);
         y += 14 * u;
-        Ui.Tracked(g, "MATCH LOG", Ui.Head(10 * u), Ui.Gold, labelX, y, 2 * u);
+        Ui.Tracked(g, "EVENT LOG", Ui.Head(10 * u), Ui.Gold, labelX, y, 2 * u);
         y += 14 * u;
         var recent = eventLog.Skip(Math.Max(0, eventLog.Count - 3)).Reverse().ToList();
-        if (recent.Count == 0) Ui.Write(g, "Nothing notable yet", Ui.Body(12.5f * u), Ui.Text3, new RectangleF(labelX, y, r.Width - 80 * u, 18 * u));
+        if (recent.Count == 0) Ui.Write(g, "No events recorded.", Ui.Body(12.5f * u), Ui.Text3, new RectangleF(labelX, y, r.Width - 80 * u, 18 * u));
         foreach (var e in recent)
         {
             Ui.Write(g, e, Ui.Body(12.5f * u), Ui.Text2, new RectangleF(labelX, y, r.Width - 80 * u, 18 * u));
             y += 18 * u;
         }
-        Ui.Tracked(g, "TAB TO CLOSE", Ui.Head(9.5f * u), Ui.Text3, cx, r.Bottom - 18 * u, 1.8f * u, StringAlignment.Center);
+        Ui.Tracked(g, "PRESS TAB TO CLOSE", Ui.Head(9.5f * u), Ui.Text3, cx, r.Bottom - 18 * u, 1.8f * u, StringAlignment.Center);
     }
 
     /// <summary>Keeps the notable moments (fouls, big runs, rack results) for the scoreboard.</summary>
@@ -1084,10 +1335,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
                 || m.Contains("reaches") || m.Contains("early") || m.Contains("is SOLIDS") || m.Contains("is STRIPES"))
                 AddEvent(m.StartsWith("FOUL") ? $"{who}: {m}" : m);
         bool visitOver = o.Foul || !o.TurnContinues || o.RackOver;
-        if (visitOver && rules.Mode == GameMode.Snooker && breakIncludingShot >= 20) AddEvent($"{who}: break of {breakIncludingShot}");
-        else if (visitOver && rules.Mode != GameMode.Snooker && !o.Foul && runIncludingShot >= 3) AddEvent($"{who}: ran {runIncludingShot} balls");
+        if (visitOver && rules.Mode == GameMode.Snooker && breakIncludingShot >= 20) AddEvent($"{who}: break of {breakIncludingShot}.");
+        else if (visitOver && rules.Mode != GameMode.Snooker && !o.Foul && runIncludingShot >= 3) AddEvent($"{who}: run of {runIncludingShot}.");
         if (o.RackOver && state.RackWinner >= 0)
-            AddEvent($"{(rules.Mode == GameMode.Snooker ? "Frame" : "Rack")} {state.RackNumber} → {state.Players[state.RackWinner].Name}");
+            AddEvent($"{(rules.Mode == GameMode.Snooker ? "Frame" : "Rack")} {state.RackNumber} awarded to {state.Players[state.RackWinner].Name}.");
     }
 
     void AddEvent(string text)
@@ -1100,11 +1351,21 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         buttons.Clear();
         buttons.Add(new UiButton { Text = state.MatchOver ? "REMATCH" : "NEXT RACK", Primary = true, OnClick = ContinueAfterRack });
+        if (history.Count > 0)
+            buttons.Add(new UiButton { Text = "RESTORE SHOT", OnClick = () => UndoLastShot() });
         buttons.Add(new UiButton { Text = "MAIN MENU", Accent = Theme.Magenta, OnClick = host.ShowMenu });
     }
 
-    const double FineStep = 0.0005;        // ~0.03 degrees
-    const double FineStepCoarse = 0.004;   // ~0.23 degrees
+    /// <summary>
+    /// One wheel or arrow tick, added to the current angle. It is a small double, not a slot on a
+    /// fixed compass. Distance scaling keeps a tick the same length on the cloth for a short or a long shot.
+    /// </summary>
+    double AimStep(bool coarse, bool ultra)
+    {
+        double dist = Math.Max(70, Vec2.Distance(state.Cue.Pos, mouseWorld));
+        double travel = ultra ? 0.055 : coarse ? 1.15 : 0.22;
+        return travel / dist;
+    }
 
     static float Distance(PointF a, PointF b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
@@ -1160,6 +1421,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
             }
         }
 
+        if (humanAim) DrawSuggestion(g);
         if (humanAim && cfg.Guide != AimGuide.Off) DrawAimGuide(g);
 
         // Soft shadows cast away from the lamp above the table centre, then the balls.
@@ -1222,10 +1484,40 @@ sealed class GameScreen : IScreen, IPhysicsListener
             Gfx.GlowPath(g, ring, ok ? Ui.Good : Ui.Bad, 1.2f, 1.6f, 1, 30);
         }
 
-        if (humanAim || phase == Phase.AIAiming)
-            DrawCue(g, aimAngle, phase == Phase.AIAiming || dragging ? dragPower : 0);
+        if (held >= 0)
+        {
+            bool ok = Placeable(held, state.Balls[held].Pos);
+            float rr = (float)(R + 4 + Math.Sin(clock * 6) * 1.5);
+            var at = state.Balls[held].Pos;
+            using var ring = new GraphicsPath();
+            ring.AddEllipse((float)at.X - rr, (float)at.Y - rr, rr * 2, rr * 2);
+            Gfx.GlowPath(g, ring, ok ? Ui.Good : Ui.Bad, 1.2f, 1.6f, 1, 30);
+        }
 
+        if (cueFollow >= 0)
+        {
+            double t = Math.Clamp(cueFollow / 0.22, 0, 1);
+            DrawCue(g, followAim, followPower * (1 - t) - 0.15 * t);
+        }
+        else if (humanAim || phase == Phase.AIAiming)
+            DrawCue(g, aimAngle, phase == Phase.AIAiming || cueStroke == CueStroke.Pulling ? dragPower : 0);
+
+        DrawFlashes(g);
+        if (ShotTrace.Show) DrawTrace(g);
         fx.Draw(g);
+    }
+
+    void DrawFlashes(Graphics g)
+    {
+        foreach (var f in flashes)
+        {
+            double a = 1 - f.Age / PocketFlash.Life;
+            if (a <= 0) continue;
+            float rad = f.Radius + (float)(f.Age * 46);
+            Color ink = Look.Realistic ? Color.White : Theme.Cyan;
+            using var pen = new Pen(Color.FromArgb((int)(200 * a), ink), Look.Realistic ? 1.6f : 2.2f);
+            g.DrawEllipse(pen, (float)f.At.X - rad, (float)f.At.Y - rad, rad * 2, rad * 2);
+        }
     }
 
     (Ball? ball, double t) FirstHit(Vec2 c, Vec2 d)
@@ -1255,6 +1547,24 @@ sealed class GameScreen : IScreen, IPhysicsListener
     }
 
     static PointF P(Vec2 v) => new((float)v.X, (float)v.Y);
+
+    /// <summary>The assist mark. Dim and dashed so it cannot be mistaken for the shot line.</summary>
+    void DrawSuggestion(Graphics g)
+    {
+        double shown;
+        lock (suggestGate) shown = suggestShown;
+        if (double.IsNaN(shown)) return;
+        double gap = Math.Abs(Math.IEEERemainder(shown - aimAngle, 2 * Math.PI));
+        if (gap < 0.12 * Math.PI / 180) return;
+        var stick = state.CurrentPlayer.Cue;
+        Vec2 c = state.Cue.Pos;
+        Vec2 d = Vec2.FromAngle(Physics.LaunchAngle(shown, spinSide, stick));
+        var (hit, tHit) = FirstHit(c, d);
+        double len = Math.Min(hit != null ? tHit : RayToRail(c, d), 340);
+        if (len < 8) return;
+        using var pen = new Pen(Color.FromArgb(150, 212, 168, 64), 1.15f) { DashStyle = DashStyle.Dash };
+        g.DrawLine(pen, P(c), P(c + d * len));
+    }
 
     void DrawAimGuide(Graphics g)
     {
@@ -1291,6 +1601,11 @@ sealed class GameScreen : IScreen, IPhysicsListener
             var gr = new RectangleF((float)(ghost.X - R), (float)(ghost.Y - R), (float)(2 * R), (float)(2 * R));
             using (var gb = new SolidBrush(Theme.A(col, 30))) g.FillEllipse(gb, gr);
             using (var gp = new Pen(Theme.A(col, 220), 1.3f)) g.DrawEllipse(gp, gr);
+            // The point where the two balls actually meet, halfway between their centres at contact.
+            Vec2 touch = tr.ObjPath.Count > 0 ? (ghost + tr.ObjPath[0]) * 0.5 : ghost + d * R;
+            float trr = 2.2f;
+            using (var tb = new SolidBrush(Theme.A(col, 230)))
+                g.FillEllipse(tb, (float)touch.X - trr, (float)touch.Y - trr, trr * 2, trr * 2);
             if (!legal)
             {
                 using var xp = new Pen(Theme.Red, 2f);
@@ -1339,6 +1654,24 @@ sealed class GameScreen : IScreen, IPhysicsListener
             g.DrawPath(pen, ring);
         }
         else Gfx.GlowPath(g, ring, color, 2f, 2.5f, 4, 50);
+    }
+
+    void DrawTrace(Graphics g)
+    {
+        using var vel = new Pen(Color.FromArgb(210, 90, 170, 230), 1.5f);
+        using var hit = new Pen(Color.FromArgb(230, 232, 196, 108), 1.7f);
+        using var rail = new Pen(Color.FromArgb(230, 120, 190, 255), 1.7f);
+        foreach (var b in state.Balls)
+        {
+            if (b.Pocketed || b.Vel.LengthSq < 4) continue;
+            var tip = b.Pos + b.Vel * 0.045;
+            g.DrawLine(vel, (float)b.Pos.X, (float)b.Pos.Y, (float)tip.X, (float)tip.Y);
+        }
+        foreach (var m in ShotTrace.Marks)
+        {
+            var tip = m.At + m.Dir * (R * 3.2);
+            g.DrawLine(m.Cushion ? rail : hit, (float)m.At.X, (float)m.At.Y, (float)tip.X, (float)tip.Y);
+        }
     }
 
     void DrawStop(Graphics g, Vec2 at, Color color)
@@ -1402,7 +1735,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
         Vec2 d = Vec2.FromAngle(angle);
         Vec2 tip = state.Cue.Pos - d * (R + 4 + power * 115);
         Vec2 butt = tip - d * 560;
-        CueArt.Draw(g, P(tip), P(butt), 2.4f, 6.4f, state.CurrentPlayer.Cue, clock, 1f);
+        var stick = state.CurrentPlayer.Cue;
+        CueDress? dress = state.CurrentPlayer.IsAI ? null : cfg.DressFor(stick.Id);
+        if (dress is { IsBlank: true }) dress = null;
+        CueArt.Draw(g, P(tip), P(butt), 2.4f, 6.4f, stick, clock, 1f, dress: dress);
     }
 
     // ------------------------------------------------------------------ HUD
@@ -1434,9 +1770,9 @@ sealed class GameScreen : IScreen, IPhysicsListener
         Ui.Hairline(g, mid.Right, top + 6 * u, mid.Right, top + h - 6 * u);
         Ui.Tracked(g, rules.Name.ToUpperInvariant(), Ui.Head(17 * u), Ui.Text, mid.X + mid.Width / 2, top + 19 * u, 2.4f * u, StringAlignment.Center);
         string sub = rules.IsSolo ? $"RACK {state.RackNumber}"
-            : rules.Mode == GameMode.Snooker ? (state.RaceTo == 1 ? "SINGLE FRAME" : $"BEST OF {2 * state.RaceTo - 1}")
-            : rules.UsesRaceTo ? (state.RaceTo == 1 ? "SINGLE RACK" : $"RACE TO {state.RaceTo}")
-            : $"FIRST TO {state.TargetScore}";
+            : rules.Mode == GameMode.Snooker ? (state.RaceTo == 1 ? "ONE FRAME" : $"BEST OF {2 * state.RaceTo - 1}")
+            : rules.UsesRaceTo ? (state.RaceTo == 1 ? "ONE RACK" : $"RACE TO {state.RaceTo}")
+            : $"TO {state.TargetScore}";
         Ui.Tracked(g, sub, Ui.Head(10.5f * u), Ui.Gold, mid.X + mid.Width / 2, top + 36 * u, 2f * u, StringAlignment.Center);
 
         for (int i = 0; i < n; i++)
@@ -1482,8 +1818,8 @@ sealed class GameScreen : IScreen, IPhysicsListener
             g.FillRectangle(rule, name.X, name.Bottom - 3 * u, name.Width, 3 * u);
         }
         Ui.Tracked(g, p.Name.ToUpperInvariant(), Ui.Head(16 * u), active ? Color.White : Ui.Text, tx, r.Y + 18 * u, 1.4f * u, align);
-        string status = active && phase == Phase.AIThinking ? "Thinking" + new string('.', 1 + (int)(clock * 3) % 3) : rules.Status(state, i);
-        string tag = p.IsAI ? $"CPU {p.Level.ToString().ToUpperInvariant()}" : "";
+        string status = active && phase == Phase.AIThinking ? "Selecting" + new string('.', 1 + (int)(clock * 3) % 3) : rules.Status(state, i);
+        string tag = p.IsAI ? AppSettings.SkillName(p.Level) : "";
         string line = string.IsNullOrEmpty(tag) ? status : string.IsNullOrEmpty(status) ? tag : $"{tag}  ·  {status}";
         Ui.Write(g, line, Ui.Body(11.5f * u), active ? Ui.Text2 : Ui.Text3, new RectangleF(name.X + pad, r.Y + 28 * u, nameW - pad * 2, 16 * u), align);
 
@@ -1534,25 +1870,37 @@ sealed class GameScreen : IScreen, IPhysicsListener
     void DrawBottomBar(Graphics g)
     {
         float h = size.Height, w = size.Width;
-        string hint = phase switch
+        (string lead, string detail) = phase switch
         {
-            Phase.Placing when HumanTurn => state.KitchenOnly
-                ? Table.HasD ? "Ball in hand — place the cue ball in the D, then click" : "Ball in hand — place the cue ball behind the head string, then click"
-                : "Ball in hand — move the cue ball anywhere, then click to place",
-            Phase.Aiming when HumanTurn => state.BallInHand
-                ? "Drag back and release to shoot   ·   click the cue ball to move it   ·   Ctrl precise aim   ·   H coach"
-                : "Aim with the mouse   ·   drag back and release   ·   Ctrl precise aim   ·   Wheel / ← → fine aim   ·   H coach",
-            Phase.AIThinking or Phase.AIAiming or Phase.AIPlacing => $"{state.CurrentPlayer.Name} is at the table   ·   F fast forward",
-            Phase.Rolling => fastForward ? "Fast forward" : "",
-            _ => "",
+            (Phase.Placing or Phase.Aiming) when held >= 0 => ("Set the ball", "Click to place. Right-click restores it."),
+            Phase.Placing when HumanTurn && state.KitchenOnly && Table.HasD => ("Ball in hand", "Place the cue ball inside the D."),
+            Phase.Placing when HumanTurn && state.KitchenOnly => ("Ball in hand", "Place the cue ball behind the head string."),
+            Phase.Placing when HumanTurn => ("Ball in hand", "Place the cue ball anywhere on the cloth."),
+            Phase.Aiming when HumanTurn && cueStroke == CueStroke.Pulling => ("Your shot", "Release to strike. Ease the cue forward to cancel."),
+            Phase.Aiming when HumanTurn && state.BallInHand => ("Your shot", "The cue points at the pointer. Draw it back, then release."),
+            Phase.Aiming when HumanTurn => ("Your shot", "The cue points at the pointer. Draw it back, then release."),
+            Phase.AIThinking or Phase.AIAiming or Phase.AIPlacing => (state.CurrentPlayer.Name, "At the table. F advances play."),
+            Phase.Rolling when fastForward => ("Accelerated", "The balls are running ahead."),
+            _ => ("", ""),
         };
-        Ui.Write(g, hint, Ui.Body(13.5f * u), Ui.Text2, new RectangleF(28 * u, h - 58 * u, w - 520 * u, 24 * u));
-        Ui.Tracked(g, "TAB SCOREBOARD     ESC MENU     G GUIDE     M SOUND", Ui.Head(9.5f * u), Ui.Text3, 28 * u, h - 26 * u, 1.6f * u);
+        if (lead.Length > 0)
+        {
+            var leadFont = Ui.BodyStrong(14 * u);
+            float leadW = g.MeasureString(lead, leadFont).Width;
+            Ui.Write(g, lead, leadFont, Ui.Text, new RectangleF(28 * u, h - 64 * u, leadW + 8, 22 * u));
+            Ui.Write(g, detail, Ui.Body(13 * u), Ui.Text2, new RectangleF(40 * u + leadW, h - 64 * u, Math.Max(40, w - 560 * u - leadW), 22 * u));
+        }
 
         // Power: a thin track with tenth ticks; gold fill; green marks where the shot pots.
         spinRadius = 24 * u;
         spinCenter = new PointF(w - 34 * u - spinRadius, h - 44 * u);
         powerRect = new RectangleF(spinCenter.X - spinRadius - 330 * u, h - 40 * u, 290 * u, 6 * u);
+        Ui.Legend(g, 28 * u, h - 22 * u, powerRect.X - 18 * u, u,
+            (Glyph.Score, "Tab", "Record"),
+            (Glyph.Pause, "Esc", "Pause"),
+            (Glyph.Restore, "Bksp", "Restore"),
+            (Glyph.Aim, "G", "Guide"),
+            (Glyph.Sound, "M", "Sound"));
         double power = dragging || phase == Phase.AIAiming ? dragPower : kbPower;
         using (var track = new SolidBrush(Color.FromArgb(46, 255, 255, 255))) g.FillRectangle(track, powerRect);
         if (power > 0.003)
@@ -1636,7 +1984,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     {
         Ui.Scrim(g, size, 175);
         float cx = size.Width / 2f, cy = size.Height / 2f;
-        float bh = buttons.Sum(b => (b.Primary ? 64 : 54) * u);
+        float bh = buttons.Sum(b => b.Height(u)) + Math.Max(0, buttons.Count - 1) * UiButton.Gap * u;
         float ph = 140 * u + bh + 18 * u;
         var r = new RectangleF(cx - 280 * u, cy - ph / 2, 560 * u, ph);
         Ui.Shadow(g, r, 6 * u, 18 * u);
@@ -1648,9 +1996,10 @@ sealed class GameScreen : IScreen, IPhysicsListener
         float by = r.Y + 134 * u;
         foreach (var b in buttons)
         {
-            b.Rect = new RectangleF(cx - 150 * u, by, 300 * u, (b.Primary ? 50 : 42) * u);
+            float h = b.Height(u);
+            b.Rect = new RectangleF(cx - 150 * u, by, 300 * u, h);
             b.Draw(g, u);
-            by += (b.Primary ? 64 : 54) * u;
+            by += h + UiButton.Gap * u;
         }
     }
 
@@ -1689,6 +2038,7 @@ sealed class GameScreen : IScreen, IPhysicsListener
     internal void DebugSetSpin(double side, double top) { spinSide = side; spinTop = top; }
     internal void DebugSetGuide(AimGuide guide) => cfg.Guide = guide;
     internal void DebugSetAssist(AimAssist assist) => cfg.Assist = assist;
+    internal void DebugAimModifiers(Keys? keys) => aimModifiersOverride = keys;
     internal void DebugShowStats() => showStats = true;
     /// <summary>Where ball <paramref name="n"/> is drawn this frame.</summary>
     internal Vec2 DrawnPos(int n) => DrawPos(state.Balls[n]);
@@ -1741,7 +2091,24 @@ sealed class GameScreen : IScreen, IPhysicsListener
         dragPower = 0.55;
         kbPower = 0.55;
         spinTop = -0.3;
-        Say($"Coach: {plan.Plan}", Theme.Lime, 60);
+        Say($"Coach. {plan.Plan}", Theme.Lime, 60);
         fx.Pulse(Table.Pockets[2].DrawCenter, Look.Realistic ? Ui.Good : Theme.Lime, 30, 60);
+    }
+}
+
+/// <summary>Recent aim decisions, kept for the freeze regression. Recording is off during play.</summary>
+static class AimDiag
+{
+    internal readonly record struct Sample(double Angle, bool Applied, bool Dragging, bool Stroke, string Phase);
+    public static bool Record;
+    public const int Capacity = 256;
+    public static readonly Sample[] Samples = new Sample[Capacity];
+    public static int Count;
+    public static void Clear() => Count = 0;
+    public static void Add(Sample sample)
+    {
+        if (!Record) return;
+        Samples[Count % Capacity] = sample;
+        Count++;
     }
 }
