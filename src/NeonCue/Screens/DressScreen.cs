@@ -122,14 +122,14 @@ sealed class DressScreen : IScreen
         {
             bool owned = cfg.OwnsMark(m.Id);
             bool on = look.MarkAt(zone) == m.Id;
-            string label = owned ? m.Name.ToUpperInvariant() : m.Name.ToUpperInvariant();
-            var chip = Chip(g, rowX, y, label, on ? Ui.Gold : owned ? Ui.Text : Ui.Text3, on);
-            if (rowX + chip.Width > x + w)
+            string label = m.Name.ToUpperInvariant();
+            // Measure first, so a chip that does not fit is drawn once, on the next row.
+            if (rowX > x && rowX + ChipWidth(g, label) > x + w)
             {
                 rowX = x;
                 y += 36 * u;
-                chip = Chip(g, rowX, y, label, on ? Ui.Gold : owned ? Ui.Text : Ui.Text3, on);
             }
+            var chip = Chip(g, rowX, y, label, on ? Ui.Gold : owned ? Ui.Text : Ui.Text3, on);
             var mark = m;
             hits.Add((chip, () => Toggle(mark)));
             rowX += chip.Width + 8 * u;
@@ -150,11 +150,16 @@ sealed class DressScreen : IScreen
         return y + 36 * u;
     }
 
+    float ChipWidth(Graphics g, string text)
+    {
+        var font = Ui.Head(11 * u);
+        return Ui.TrackedWidth(g, text, font, font.Size * 0.12f) + 22 * u;
+    }
+
     RectangleF Chip(Graphics g, float x, float y, string text, Color color, bool on)
     {
         var font = Ui.Head(11 * u);
-        float tw = Ui.TrackedWidth(g, text, font, font.Size * 0.12f);
-        var r = new RectangleF(x, y, tw + 22 * u, 28 * u);
+        var r = new RectangleF(x, y, ChipWidth(g, text), 28 * u);
         if (on)
         {
             using var fill = new SolidBrush(Color.FromArgb(28, Ui.Gold));
