@@ -12,7 +12,9 @@
     <RootNamespace>NeonCue</RootNamespace>
     <Product>Neon Cue</Product>
     <Version>1.12.0</Version>
-    <Description>Neon-styled billiards with a physics-driven AI.</Description>
+    <Company>LeerBox</Company>
+    <Copyright>Copyright (c) 2026 LeerBox. MIT License.</Copyright>
+    <Description>Neon Cue billiards</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -18,7 +18,7 @@ playing them out in that same engine.
 2. Unzip it anywhere and run **`NeonCue.exe`**. Nothing else is needed: .NET is bundled, and there is no installer.
 3. The game is not code-signed yet, so Windows may warn you the first time. On the blue SmartScreen dialog, click **More info → Run anyway**. If **Smart App Control** is on, Windows blocks unsigned apps completely. You can only run the game with it switched off (Windows Security → App & browser control).
 
-Settings, coins and cues are saved in `%AppData%\NeonCue`. If the game ever crashes, the details are written to `crash.log` in the same folder.
+Releases are built on GitHub Actions; see the [Code signing policy](#code-signing-policy). Settings, coins and cues are saved in `%AppData%\NeonCue`. If the game ever crashes, the details are written to `crash.log` in the same folder.
 
 ## Features
 
@@ -175,6 +175,23 @@ src/NeonCue.Core     Physics, table geometry, game rules, AI (platform independe
 src/NeonCue          WinForms front end: rendering, menus, HUD, input, sound
 tests/NeonCue.Sim    Headless simulator / benchmark
 ```
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+Release builds are produced from this repository by the [release workflow](.github/workflows/release.yml) on GitHub Actions. Every signing request is approved by hand.
+
+**Team roles**
+
+- Committers and reviewers: [LeerBox](https://github.com/LeerBox)
+- Approvers: [LeerBox](https://github.com/LeerBox)
+
+Changes from anyone outside the team arrive as pull requests and are reviewed before they are merged.
+
+**Privacy policy**
+
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Neon Cue has no online features. Settings, coins and cues are stored only on your computer, in `%AppData%\NeonCue`.
 
 ## License
 
