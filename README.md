@@ -10,6 +10,15 @@ playing them out in that same engine.
 ![Snooker](docs/snooker.png)
 ![Scoreboard](docs/scoreboard.png)
 ![Cue shop](docs/shop.png)
+![Cue atelier](docs/atelier.png)
+
+## Download and play
+
+1. Open the [latest release](../../releases/latest) and download **`NeonCue-win-x64.zip`**.
+2. Unzip it anywhere and run **`NeonCue.exe`**. Nothing else is needed: .NET is bundled, and there is no installer.
+3. The game is not code-signed yet, so Windows may warn you the first time. On the blue SmartScreen dialog, click **More info → Run anyway**. If **Smart App Control** is on, Windows blocks unsigned apps completely. You can only run the game with it switched off (Windows Security → App & browser control).
+
+Settings, coins and cues are saved in `%AppData%\NeonCue`. If the game ever crashes, the details are written to `crash.log` in the same folder.
 
 ## Features
 
@@ -22,7 +31,7 @@ playing them out in that same engine.
   - The AI picks colours by value (it goes for the black), plays safety, opens with a safe break-off rather than a power break, and concedes frames it can no longer win.
 - **Opponents**: you vs CPU, 2 players on one PC (hot seat), or CPU vs CPU (watch mode).
 - **4 AI levels**: Rookie, Amateur, Pro and Master. Each level searches more shots and has a steadier stroke than the one below.
-- **Cue shop**: 8 cues from a free House Cue to the 50,000-coin Black Diamond Royale. Every stat changes the physics (see below). You earn coins by potting balls and beating the CPU.
+- **Cue shop**: 12 cues from a free House Cue to the 50,000-coin Black Diamond Royale. Every stat changes the physics (see below). You earn coins by potting balls and beating the CPU.
 - **AI coach**: press **H** and the AI suggests a shot for you (aim, power and spin), ready to fire with Space.
 - **Real physics** (validated against textbook billiards results on every build):
   - Every ball has a 3-D spin vector. It slides on the cloth (μ 0.2), then rolls (μ 0.01) at 5/7 of its speed after a centre-ball hit.
@@ -52,17 +61,23 @@ playing them out in that same engine.
 
 ## Cues
 
-| Cue | Tier | Price | Speed | Spin | Wobble | Deflection | Perks |
-|---|---|---:|---:|---:|---:|---:|---|
-| House Cue | Common | free | ×0.90 | ×0.70 | ±0.25° | 1.6° | — |
-| Neon Starter | Common | 500 | ×0.95 | ×0.85 | ±0.18° | 1.35° | — |
-| Violet Viper | Rare | 1,500 | ×1.00 | ×1.05 | ±0.15° | 1.05° | — |
-| Thunder Breaker | Rare | 3,000 | ×1.12 | ×0.85 | ±0.18° | 1.2° | Break boost +22% |
-| Carbon Phantom | Epic | 6,000 | ×1.02 | ×1.15 | ±0.08° | 0.3° | Low deflection |
-| Silk Road Inlay | Epic | 12,000 | ×1.04 | ×1.25 | ±0.05° | 0.7° | — |
-| Golden Dragon | Legendary | 25,000 | ×1.08 | ×1.35 | ±0.02° | 0.4° | Low deflection, Eagle Eye |
-| Black Diamond Royale | Mythic | 50,000 | ×1.10 | ×1.40 | ±0.00° | 0.2° | All three |
+| Cue | Tier | Price | Speed | Spin | Wobble | Deflection | Draw | Perks |
+|---|---|---:|---:|---:|---:|---:|---|---|
+| House Cue | Common | free | ×0.90 | ×0.70 | ±0.25° | 1.6° | Even | — |
+| Neon Starter | Common | 500 | ×0.95 | ×0.85 | ±0.18° | 1.35° | Even | — |
+| Ash Linen | Common | 800 | ×0.88 | ×0.95 | ±0.12° | 1.2° | Soft | Feather touch |
+| Violet Viper | Rare | 1,500 | ×1.00 | ×1.08 | ±0.15° | 1.05° | Even | — |
+| Bank Ivory | Rare | 2,400 | ×0.97 | ×0.92 | ±0.09° | 0.95° | Even | Eagle Eye |
+| Thunder Breaker | Rare | 3,200 | ×1.14 | ×0.82 | ±0.20° | 1.25° | Heavy | Break boost +24% |
+| Carbon Phantom | Epic | 6,000 | ×1.02 | ×1.12 | ±0.08° | 0.32° | Even | Low deflection |
+| Helix Carbon | Epic | 7,800 | ×1.00 | ×1.16 | ±0.07° | 0.26° | Even | Low deflection |
+| Silk Road Inlay | Epic | 12,000 | ×1.03 | ×1.28 | ±0.05° | 0.72° | Soft | Feather touch |
+| Aurora Crystal | Legendary | 18,000 | ×0.98 | ×1.20 | ±0.04° | 0.5° | Soft | Eagle Eye |
+| Golden Dragon | Legendary | 25,000 | ×1.06 | ×1.30 | ±0.03° | 0.42° | Even | Low deflection, Eagle Eye |
+| Black Diamond Royale | Mythic | 50,000 | ×1.05 | ×1.26 | ±0.02° | 0.38° | Soft | Low deflection, Eagle Eye |
 
+- **Draw** is how the pull maps onto power: a *soft* cue stays gentle for longer (for touch shots), a *heavy* cue reaches full speed sooner (for breaking). **Feather touch** keeps soft strokes almost wobble-free.
+- **Cue Atelier**: dress any cue you own with marks on the forearm, wrap or sleeve, a trim, a wrap, a sheen, a butt ornament and a short signature. It is purely cosmetic; the stroke does not change. Extra mark sets can be bought with coins.
 - **Speed** scales the cue ball's top speed, and **Spin** scales how much follow, draw and english it carries.
 - **Wobble** is random stroke error at full power. Soft shots wobble only 30% as much, and a faint cone on the aim line shows the spread at your current power. A weaker cue also magnifies the CPU's own aiming error.
 - **Deflection** ("squirt") is how far side spin pushes the cue ball off the stick line. The aim guide shows the real launch line, so you can see it.
